@@ -29,6 +29,7 @@ def test_epub_is_standalone_and_follows_navigation_and_spine(tmp_path: Path) -> 
     assert "*emphasis*" in result.ssmd
     assert "**strong**" in result.ssmd
     assert "*CSS emphasis*" in result.ssmd
+    assert "*linked text*" in result.ssmd
     assert "\n---\n" in result.ssmd
     assert "世界" in result.ssmd
 
@@ -51,7 +52,7 @@ def test_epub_chapter_options_are_centralized() -> None:
         minimum_body_heading_level=2,
         preserve_emphasis=True,
         preserve_strong=True,
-        link_mode="preserve",
+        link_mode="unwrap",
         code_mode="preserve",
         resolve_css_emphasis=True,
         preserve_scene_breaks=True,

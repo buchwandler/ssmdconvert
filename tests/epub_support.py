@@ -25,7 +25,8 @@ def make_epub(
         "<html><head><style>.italic { font-style: italic; }</style></head>"
         "<body><h1>One</h1><h2>Opening</h2>"
         "<p>Hello, 世界, <em>emphasis</em> and <strong>strong</strong>, "
-        '<span style="font-style: italic">CSS emphasis</span>.</p>'
+        '<span style="font-style: italic">CSS emphasis</span>, '
+        '<a href="https://example.test"><em>linked text</em></a>.</p>'
         "<hr/><p>After the break.</p></body></html>"
     )
     chapter_two = epub.EpubHtml(

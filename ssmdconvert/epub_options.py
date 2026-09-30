@@ -9,7 +9,7 @@ def default_epub_chapter_options() -> ChapterMarkdownOptions:
         minimum_body_heading_level=2,
         preserve_emphasis=True,
         preserve_strong=True,
-        link_mode="preserve",
+        link_mode="unwrap",
         code_mode="preserve",
         resolve_css_emphasis=True,
         preserve_scene_breaks=True,
