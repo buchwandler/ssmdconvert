@@ -13,6 +13,12 @@ def parse_chapter_selection(
     *,
     available_numbers: Collection[int],
 ) -> tuple[int, ...]:
+    """Parse a chapter selector and return selected source numbers in source order.
+
+    Selectors accept ``all``, a source number, a range, or comma-separated
+    combinations such as ``1,3-5``. Unavailable or malformed selections raise
+    :class:`ChapterSelectionError`.
+    """
     available = tuple(sorted(set(available_numbers)))
     available_set = set(available)
 

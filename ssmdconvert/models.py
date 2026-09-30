@@ -10,6 +10,8 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class SourceInfo:
+    """Identity and media type for a converted source."""
+
     path: Path
     format: str
     media_type: str | None = None
@@ -17,6 +19,8 @@ class SourceInfo:
 
 @dataclass(slots=True)
 class Section:
+    """A normalized, ordered portion of a source document."""
+
     id: str
     markdown: str
     title: str | None = None
@@ -26,6 +30,8 @@ class Section:
 
 @dataclass(slots=True)
 class Document:
+    """Source-neutral document model passed between adapters and renderers."""
+
     source: SourceInfo
     sections: list[Section]
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -33,6 +39,8 @@ class Document:
 
 @dataclass(slots=True)
 class ConversionResult:
+    """Rendered SSMD with its normalized document and conversion warnings."""
+
     document: Document
     ssmd: str
     warnings: list[str] = field(default_factory=list)
@@ -40,6 +48,8 @@ class ConversionResult:
 
 @dataclass(frozen=True, slots=True)
 class BookChapter:
+    """One source chapter represented as a standalone SSMD document."""
+
     id: str
     source_number: int
     title: str
@@ -55,6 +65,8 @@ class BookChapter:
 
 @dataclass(frozen=True, slots=True)
 class Book:
+    """Chapter-aware representation of a source book."""
+
     source: SourceInfo
     metadata: Mapping[str, Any]
     chapters: tuple[BookChapter, ...]
@@ -65,6 +77,8 @@ class Book:
 
 @dataclass(frozen=True, slots=True)
 class BookInspectionChapter:
+    """Inventory metadata for one source chapter."""
+
     id: str
     source_number: int
     title: str
@@ -78,6 +92,8 @@ class BookInspectionChapter:
 
 @dataclass(frozen=True, slots=True)
 class BookInspection:
+    """Source metadata and ordered chapter inventory for a book."""
+
     source: Path
     source_format: str
     metadata: Mapping[str, Any]

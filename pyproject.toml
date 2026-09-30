@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Convert documents and books into SSMD, with optional semantic enrichment."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = "Apache-2.0"
 authors = [{ name = "Holger Nahrstaedt" }]
 keywords = ["ssmd", "tts", "audiobook", "conversion", "epub", "markdown", "pdf", "jev"]
 classifiers = [
@@ -32,22 +32,25 @@ dependencies = [
 
 [project.optional-dependencies]
 jev = ["pyjev>=0,<1"]
-sfx = ["sfxrender>=0"]
 pdf = ["pypdf>=5,<7"]
 docx = ["python-docx>=1.1,<2"]
 all = [
   "pyjev>=0,<1",
-  "sfxrender>=0",
   "pypdf>=5,<7",
   "python-docx>=1.1,<2",
 ]
 dev = [
   "pytest>=8,<10",
+  "pytest-cov>=6,<8",
+  "click>=8,<9",
   "ruff>=0.16,<1",
+  "mypy>=1,<3",
   "build>=1,<2",
   "twine>=6,<7",
+  "ebooklib>=0.18",
   "pypdf>=5,<7",
   "python-docx>=1.1,<2",
+  "tomli>=2; python_version < '3.11'",
 ]
 
 [project.scripts]

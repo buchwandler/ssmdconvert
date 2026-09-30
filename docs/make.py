@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-Script to build documentation for pykokoro.
+Script to build documentation for ssmdconvert.
 
-This script builds the Sphinx documentation for the pykokoro package.
+This script builds the Sphinx documentation for the ssmdconvert package.
 It can be run using:
     python docs/make.py [option]
 

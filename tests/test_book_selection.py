@@ -16,7 +16,6 @@ AVAILABLE = (1, 2, 3, 4, 5, 7, 9, 10)
         ("2-4", (2, 3, 4)),
         ("1-3,7,9-10", (1, 2, 3, 7, 9, 10)),
         ("5,2,4", (2, 4, 5)),
-        ("5,2-3,3", (2, 3, 5)),
         (" 2 - 4 , 5 ", (2, 3, 4, 5)),
     ],
 )
@@ -24,6 +23,10 @@ def test_chapter_selection_follows_source_order(
     spec: str | None, expected: tuple[int, ...]
 ) -> None:
     assert parse_chapter_selection(spec, available_numbers=AVAILABLE) == expected
+
+
+def test_duplicate_source_numbers_are_selected_once() -> None:
+    assert parse_chapter_selection("5,2-3,3", available_numbers=AVAILABLE) == (2, 3, 5)
 
 
 def test_subset_bundle_source_numbers_are_not_renumbered() -> None:

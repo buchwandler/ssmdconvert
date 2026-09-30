@@ -85,7 +85,7 @@ def _inspect_epub(
 
 
 def inspect_book(source: str | Path) -> BookInspection:
-    """Inspect the ordered chapter inventory and source metadata of an EPUB."""
+    """Return EPUB metadata and its ordered source chapter inventory."""
     inspection, _documents = _inspect_epub(source)
     return inspection
 
@@ -95,7 +95,7 @@ def convert_book(
     *,
     chapters: str | None = "all",
 ) -> Book:
-    """Convert selected EPUB chapters to independently valid SSMD documents."""
+    """Convert selected EPUB chapters to standalone SSMD in source order."""
     inspection, source_documents = _inspect_epub(source)
     selected_numbers = parse_chapter_selection(
         chapters,

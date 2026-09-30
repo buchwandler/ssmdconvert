@@ -122,7 +122,8 @@ def sfx_catalog_candidates() -> tuple[list[Any], dict[str, dict[str, Any]]]:
         from sfxrender import llm_catalog
     except ImportError as exc:  # pragma: no cover - environment dependent
         raise MissingDependencyError(
-            "SFX enrichment requires: pip install 'ssmdconvert[jev,sfx]'"
+            "SFX enrichment requires the optional sfxrender package, "
+            "which is not included in an ssmdconvert extra."
         ) from exc
     manifest = llm_catalog()
     effects = dict(manifest.get("effects", {}))
@@ -178,7 +179,8 @@ def choose_sfx(
                 SFXRenderer().validate_uri(uri)
             except ImportError as exc:  # pragma: no cover
                 raise MissingDependencyError(
-                    "SFX enrichment requires: pip install 'ssmdconvert[jev,sfx]'"
+                    "SFX enrichment requires the optional sfxrender package, "
+                    "which is not included in an ssmdconvert extra."
                 ) from exc
     decision = result.decision
     return (

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from click import unstyle
 from typer.testing import CliRunner
 
 from ssmdconvert.cli import app
@@ -22,4 +23,4 @@ def test_enrich_requires_explicit_cloud_ack(tmp_path: Path) -> None:
     source.write_text('---\nssmd_version: "0.9"\n---\nHello.\n', encoding="utf-8")
     result = runner.invoke(app, ["enrich", str(source), "--speakers"])
     assert result.exit_code != 0
-    assert "--yes-cloud" in result.output
+    assert "--yes-cloud" in unstyle(result.output)

@@ -8,12 +8,12 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath(".."))
-sys.path.insert(0, os.path.abspath("../pykokoro"))
+sys.path.insert(0, os.path.abspath("../ssmdconvert"))
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = "pykokoro"
-copyright = "2025, Holger Nahrstaedt"
+project = "ssmdconvert"
+copyright = "2026, Holger Nahrstaedt"
 author = "Holger Nahrstaedt"
 
 # -- General configuration ---------------------------------------------------
@@ -96,6 +96,4 @@ html_theme_options = {
 # Set up intersphinx maps
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "numpy": ("https://numpy.org/doc/stable", None),
-    "PIL": ("https://pillow.readthedocs.io/en/stable", None),
 }
