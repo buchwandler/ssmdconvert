@@ -67,6 +67,57 @@ result = Converter().convert("book.epub")
 print(result.ssmd)
 ```
 
+## EPUB chapters and book bundles
+
+EPUB extraction and chapter semantics are provided by the public `epub2text` chapter API. The
+existing conversion path still returns one combined SSMD document, so current `convert()` and
+`Converter.convert()` callers do not need to change:
+
+```bash
+ssmdconvert convert novel.epub -o novel.ssmd
+```
+
+To inspect the source chapter inventory, create one standalone SSMD document per chapter, or
+validate a saved bundle:
+
+```bash
+ssmdconvert book chapters novel.epub
+ssmdconvert book chapters novel.epub --json
+ssmdconvert book novel.epub -o novel.ssmdbook
+ssmdconvert book novel.epub --chapters 2-20 -o selected.ssmdbook
+ssmdconvert book novel.epub -o novel.ssmdbook.zip
+ssmdconvert book validate novel.ssmdbook
+```
+
+Chapter selectors use the original 1-based source numbers. Selectors can be a single number, a
+range, a comma-separated list, or a mixture such as `1,3-5`; selected chapters remain in source
+order. Each generated chapter is independently valid SSMD 0.9 and includes a spoken H1 title.
+Chapter metadata retains source provenance and navigation hierarchy where available.
+
+A `.ssmdbook` directory is the editable form. Each chapter is a regular SSMD file that can be
+revised in place. A `.zip` output is the portable form. Both formats use the same
+`manifest.json`; its chapter array is authoritative for playback and book order, not filenames,
+titles, or directory enumeration. Downstream tools can consume the SSMD chapter files without
+requiring Readio.
+
+The Python API exposes the same operations:
+
+```python
+from ssmdconvert import (
+    convert_book,
+    inspect_book,
+    load_book_bundle,
+    validate_book_bundle,
+    write_book_bundle,
+)
+
+inspection = inspect_book("novel.epub")
+book = convert_book("novel.epub", chapters="2-20")
+write_book_bundle(book, "selected.ssmdbook")
+loaded = load_book_bundle("selected.ssmdbook")
+validate_book_bundle("selected.ssmdbook")
+```
+
 The default adapters normalize sources into a small source-neutral document model and
 then render SSMD 0.9. Existing `.ssmd` is parsed and re-emitted as SSMD 0.9 rather than
 being routed through an EPUB- or Readio-specific model.
@@ -123,9 +174,7 @@ Use `--report decisions.json` to persist speaker/SFX/voice decisions and confide
 
 ## MVP limitations
 
-- EPUB conversion is intentionally dependency-light and implements the normal EPUB
-  container/OPF/spine path. It is not a replacement for a full browser layout engine.
-- TXT chapter detection is heuristic; a plain file without recognizable chapter headings
+- EPUB chapter extraction delegates to `epub2text`; it is not a full browser layout engine.
   becomes one section.
 - PDF extraction uses `pypdf` text extraction and cannot OCR scanned pages.
 - DOCX support extracts paragraphs/headings; complex floating layout is ignored.

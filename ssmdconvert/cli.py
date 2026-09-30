@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from . import __version__
+from .books import convert_book, inspect_book
+from .bundle import validate_book_bundle, write_book_bundle
 from .converter import Converter
 from .enrich import enrich_ssmd, load_voice_inventory
 from .errors import SSMDConvertError
@@ -87,6 +90,62 @@ def inspect(
     for item in payload["sections"]:
         typer.echo(f"  {item['id']}: {item['title'] or '(untitled)'} ({item['chars']} chars)")
     typer.echo("Local inspection: no content was sent to JEV.")
+
+
+@app.command("book")
+def book(
+    source_or_action: Annotated[str, typer.Argument()],
+    source: Annotated[Path | None, typer.Argument()] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    chapters: Annotated[str, typer.Option("--chapters")] = "all",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Inspect EPUB chapters, create book bundles, or validate bundles."""
+    try:
+        if source_or_action == "chapters":
+            if source is None:
+                raise typer.BadParameter("book chapters requires an EPUB SOURCE")
+            inspection = inspect_book(source)
+            payload = {
+                "source": str(inspection.source),
+                "source_format": inspection.source_format,
+                "metadata": dict(inspection.metadata),
+                "chapters": [asdict(chapter) for chapter in inspection.chapters],
+            }
+            if json_output:
+                typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+                return
+            for chapter in inspection.chapters:
+                indent = "  " * (chapter.level - 1)
+                provenance = f"id={chapter.source_id}" if chapter.source_id else ""
+                if chapter.href:
+                    provenance = (
+                        f"{provenance}, href={chapter.href}"
+                        if provenance
+                        else f"href={chapter.href}"
+                    )
+                suffix = f" ({provenance})" if provenance else ""
+                typer.echo(
+                    f"{chapter.source_number:04d}  {indent}{chapter.title} "
+                    f"[level {chapter.level}]{suffix}"
+                )
+            return
+        if source_or_action == "validate":
+            if source is None:
+                raise typer.BadParameter("book validate requires a BUNDLE path")
+            validate_book_bundle(source)
+            typer.echo(f"Valid book bundle: {source}")
+            return
+        if source is not None:
+            raise typer.BadParameter("book conversion accepts one EPUB SOURCE followed by options")
+        source_path = Path(source_or_action)
+        book_data = convert_book(source_path, chapters=chapters)
+        destination = output or source_path.with_suffix(".ssmdbook")
+        written = write_book_bundle(book_data, destination)
+    except (SSMDConvertError, OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Created SSMD book bundle: {written}")
+    typer.echo(f"Chapters: {len(book_data.chapters)}")
 
 
 @app.command()

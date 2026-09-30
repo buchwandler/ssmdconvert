@@ -4,8 +4,9 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from .adapters import InputAdapter, default_adapters
+from .books import convert_book as _convert_book
 from .errors import UnsupportedInputError
-from .models import ConversionResult, Document
+from .models import Book, ConversionResult, Document
 from .render import render_document
 
 
@@ -28,6 +29,14 @@ class Converter:
         if not path.is_file():
             raise FileNotFoundError(path)
         return self.adapter_for(path).load(path)
+
+    def convert_book(
+        self,
+        source: str | Path,
+        *,
+        chapters: str | None = "all",
+    ) -> Book:
+        return _convert_book(source, chapters=chapters)
 
     def convert(
         self,
