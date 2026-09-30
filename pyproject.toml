@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=80", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ssmdconvert"
+dynamic = ["version"]
+description = "Convert documents and books into SSMD, with optional semantic enrichment."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Holger Nahrstaedt" }]
+keywords = ["ssmd", "tts", "audiobook", "conversion", "epub", "markdown", "pdf", "jev"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Text Processing :: Markup",
+]
+dependencies = [
+  "ssmd>=0.9.0,<1",
+  "typer>=0.20,<1",
+]
+
+[project.optional-dependencies]
+jev = ["pyjev>=0,<1"]
+sfx = ["sfxrender>=0"]
+pdf = ["pypdf>=5,<7"]
+docx = ["python-docx>=1.1,<2"]
+all = [
+  "pyjev>=0,<1",
+  "sfxrender>=0",
+  "pypdf>=5,<7",
+  "python-docx>=1.1,<2",
+]
+dev = [
+  "pytest>=8,<10",
+  "ruff>=0.16,<1",
+  "build>=1,<2",
+  "twine>=6,<7",
+  "pypdf>=5,<7",
+  "python-docx>=1.1,<2",
+]
+
+[project.scripts]
+ssmdconvert = "ssmdconvert.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/buchwandler/ssmdconvert"
+Repository = "https://github.com/buchwandler/ssmdconvert"
+Issues = "https://github.com/buchwandler/ssmdconvert/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ssmdconvert*"]
+
+[tool.setuptools.package-data]
+ssmdconvert = ["py.typed"]
+
+[tool.setuptools_scm]
+version_file = "ssmdconvert/_version.py"
+fallback_version = "0+unknown"
+parentdir_prefix_version = "ssmdconvert-"
+local_scheme = "no-local-version"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
