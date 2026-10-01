@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-import spokenform
+spokenform = pytest.importorskip("spokenform")
 from ssmd import parse_structure
 
 from ssmdconvert.speech import (
