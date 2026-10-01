@@ -6,6 +6,8 @@
 
 Core conversion is local and does not require JEV or Readio. JEV-backed enrichment is opt-in and requires an explicit `--yes-cloud` acknowledgement.
 
+Speech preparation and Unicode QC are also opt-in (`--speech audit` or `--speech annotate`); the default remains unchanged. Annotation uses SSMD `sub` to keep written text visible, reports unsafe or suspicious mappings instead of guessing, and runs locally without JEV or cloud calls. See [CLI usage](docs/usage.md#opt-in-speech-preparation-and-qc) for language, glossary, strictness, and JSON report options.
+
 ## Install
 
 ```bash
@@ -94,6 +96,8 @@ ssmdconvert book validate novel.ssmdbook.zip
 
 Chapter selectors use original 1-based source numbers. They accept a single number, a range, a comma-separated list, or a mixture such as `1,3-5`. Selected chapters remain in source order. Bundle playback order comes from the manifest chapter array, not filenames.
 
+Speech preparation remains opt-in for books too. For selected chapters, `--speech annotate` adds safe `sub` aliases and writes a sibling `<bundle-name>.speech-report.json` sidecar; `--speech audit` reports without changing chapter SSMD. Speech reports are not added to the version-1 bundle manifest. See [Books](docs/books.md#speech-preparation-and-reports) for JSON/TOML glossary and strict-QC options.
+
 ## Python API
 
 Convert a normal document:
@@ -125,15 +129,15 @@ validate_book_bundle("selected.ssmdbook")
 
 ## Supported inputs
 
-| Input | Install | Notes |
-|---|---|---|
-| Plain text | core | Local conversion |
-| Markdown | core | Normalized into source-neutral sections |
-| HTML | core | Converted to normalized Markdown and SSMD |
-| EPUB | core | Extraction uses `epub2text` |
-| SSMD | core | Parsed and re-emitted as SSMD 0.9 |
-| PDF | `ssmdconvert[pdf]` | Text extraction only, no OCR |
-| DOCX | `ssmdconvert[docx]` | Paragraphs and headings; complex layout is not preserved |
+| Input      | Install             | Notes                                                    |
+| ---------- | ------------------- | -------------------------------------------------------- |
+| Plain text | core                | Local conversion                                         |
+| Markdown   | core                | Normalized into source-neutral sections                  |
+| HTML       | core                | Converted to normalized Markdown and SSMD                |
+| EPUB       | core                | Extraction uses `epub2text`                              |
+| SSMD       | core                | Parsed and re-emitted as SSMD 0.9                        |
+| PDF        | `ssmdconvert[pdf]`  | Text extraction only, no OCR                             |
+| DOCX       | `ssmdconvert[docx]` | Paragraphs and headings; complex layout is not preserved |
 
 ## Optional semantic enrichment
 

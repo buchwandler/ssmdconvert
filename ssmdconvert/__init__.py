@@ -23,6 +23,14 @@ from .models import (
     Section,
     SourceInfo,
 )
+from .speech import (
+    SpeechChange,
+    SpeechIssue,
+    SpeechPreparationOptions,
+    SpeechPreparationReport,
+    SpeechPreparationResult,
+    prepare_ssmd_for_speech,
+)
 
 try:
     from ._version import version as __version__
@@ -48,9 +56,15 @@ __all__ = [
     "Document",
     "Section",
     "SourceInfo",
+    "SpeechChange",
+    "SpeechIssue",
+    "SpeechPreparationOptions",
+    "SpeechPreparationReport",
+    "SpeechPreparationResult",
     "UnsupportedBookSourceError",
     "__version__",
     "convert",
+    "prepare_ssmd_for_speech",
     "convert_book",
     "inspect_book",
     "load_book_bundle",

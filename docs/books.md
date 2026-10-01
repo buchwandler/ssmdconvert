@@ -21,6 +21,24 @@ ssmdconvert book novel.epub --chapters 2-20 -o selected.ssmdbook
 
 Selectors use original 1-based source chapter numbers and address the complete source inventory. The output remains in source order even if selector text is unsorted. Duplicate numbers do not duplicate chapters. Missing chapters, zero or negative numbers, reversed ranges, and malformed tokens raise `ChapterSelectionError`.
 
+## Speech preparation and reports
+
+Speech preparation can be enabled independently for the selected chapters:
+
+```bash
+ssmdconvert book novel.epub \
+  --chapters 2-5 \
+  --speech annotate \
+  --speech-language en \
+  --pronunciations pronunciations.json
+```
+
+`--speech` supports `off` (default), `audit`, and `annotate`. Each selected chapter is prepared separately using its effective language. If speech preparation is enabled and `--speech-report` is omitted, the CLI writes a sibling JSON sidecar named `<bundle-name>.speech-report.json`; supply `--speech-report PATH` to choose another location. The sidecar identifies chapters by ID and includes each deterministic speech report. Speech-off mode writes no automatic sidecar, though an explicit `--speech-report` can request an empty report.
+
+The Python `Book.speech_reports` mapping contains the reports for selected chapter IDs. Unresolved Unicode issues, skipped unsafe mappings, and language warnings are also projected into the existing chapter `diagnostics` list. The detailed report mapping is transient: it is not added to the version-1 bundle manifest, so the bundle schema and chapter order/metadata remain unchanged. `--strict-speech` fails the conversion on error-level QC findings. All processing is local; nothing is sent to JEV or a cloud provider.
+
+Generated `sub` annotations keep source text visible. Existing author `sub`, `as`/`say-as`, and phoneme instructions are preserved. Any existing `say-as` interpretation remains dependent on the downstream consumer/provider.
+
 ## Directory bundle
 
 ```bash

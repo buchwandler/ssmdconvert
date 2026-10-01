@@ -81,3 +81,38 @@ def test_book_command_rejects_invalid_selection_and_missing_source(tmp_path: Pat
     result = runner.invoke(app, ["book", "chapters"])
     assert result.exit_code != 0
     assert "requires an EPUB SOURCE" in result.output
+
+
+def test_book_cli_writes_selected_chapter_speech_sidecar(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    make_epub(source)
+    glossary = tmp_path / "pronunciations.json"
+    glossary.write_text('{"World":"planet"}', encoding="utf-8")
+    bundle = tmp_path / "selected.ssmdbook"
+
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            str(source),
+            "--chapters",
+            "2",
+            "--speech",
+            "annotate",
+            "--pronunciations",
+            str(glossary),
+            "--output",
+            str(bundle),
+        ],
+    )
+
+    sidecar = tmp_path / "selected.ssmdbook.speech-report.json"
+    assert result.exit_code == 0, result.output
+    assert sidecar.is_file()
+    assert "Speech report:" in result.output
+    converted = load_book_bundle(bundle)
+    assert [chapter.source_number for chapter in converted.chapters] == [2]
+    assert '[World]{sub="planet"}' in converted.chapters[0].ssmd
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert [chapter["chapter_id"] for chapter in payload["chapters"]] == ["chapter-0002"]
+    assert payload["chapters"][0]["report"]["changes"][0]["source_text"] == "World"

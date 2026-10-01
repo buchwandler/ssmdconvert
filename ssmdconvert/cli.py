@@ -5,6 +5,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
+
 import typer
 
 from . import __version__
@@ -13,6 +18,8 @@ from .bundle import validate_book_bundle, write_book_bundle
 from .converter import Converter
 from .enrich import enrich_ssmd, load_voice_inventory
 from .errors import SSMDConvertError
+from .models import Book
+from .speech import SpeechPreparationOptions
 
 app = typer.Typer(
     help="Convert documents and books to SSMD; optionally enrich them with JEV.",
@@ -37,6 +44,48 @@ def main(
     del version
 
 
+def _load_pronunciations(path: Path) -> dict[str, str]:
+    """Load a flat source-to-spoken mapping from JSON or TOML."""
+    suffix = path.suffix.lower()
+    try:
+        text = path.read_text(encoding="utf-8")
+        if suffix == ".json":
+            parsed = json.loads(text)
+        elif suffix == ".toml":
+            parsed = tomllib.loads(text)
+        else:
+            raise ValueError("pronunciation files must use a .json or .toml extension")
+    except (json.JSONDecodeError, tomllib.TOMLDecodeError) as error:
+        raise ValueError(f"Invalid pronunciation file {path}: {error}") from error
+
+    if not isinstance(parsed, dict):
+        raise ValueError("pronunciation file must contain a mapping")
+    mapping = parsed.get("pronunciations", parsed)
+    if not isinstance(mapping, dict) or any(
+        not isinstance(source, str) or not isinstance(spoken, str)
+        for source, spoken in mapping.items()
+    ):
+        raise ValueError("pronunciation mapping must contain only string keys and values")
+    return dict(mapping)
+
+
+def _book_speech_report_payload(book_data: Book) -> dict[str, object]:
+    """Serialize per-chapter speech reports without changing bundle contents."""
+    return {
+        "backend": "spokenform",
+        "chapters": [
+            {
+                "chapter_id": chapter.id,
+                "source_number": chapter.source_number,
+                "title": chapter.title,
+                "report": book_data.speech_reports[chapter.id].to_dict(),
+            }
+            for chapter in book_data.chapters
+            if chapter.id in book_data.speech_reports
+        ],
+    }
+
+
 @app.command()
 def convert(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
@@ -44,15 +93,78 @@ def convert(
     title: Annotated[str | None, typer.Option("--title")] = None,
     author: Annotated[str | None, typer.Option("--author")] = None,
     language: Annotated[str | None, typer.Option("--language")] = None,
+    speech_mode: Annotated[
+        str,
+        typer.Option("--speech", help="Speech preparation: off, audit, or annotate."),
+    ] = "off",
+    speech_language: Annotated[str | None, typer.Option("--speech-language")] = None,
+    strict_speech: Annotated[
+        bool,
+        typer.Option("--strict-speech/--no-strict-speech"),
+    ] = False,
+    sequence_fallback: Annotated[
+        str,
+        typer.Option("--sequence-fallback", help="Sequence fallback: preserve or spell."),
+    ] = "spell",
+    pronunciations: Annotated[
+        Path | None,
+        typer.Option("--pronunciations", exists=True, dir_okay=False, readable=True),
+    ] = None,
+    speech_report: Annotated[Path | None, typer.Option("--speech-report")] = None,
 ) -> None:
-    """Convert a supported input into SSMD locally."""
+    """Convert a supported input into SSMD with opt-in local speech preparation."""
+    speech_mode = speech_mode.lower()
+    sequence_fallback = sequence_fallback.lower()
+    if speech_mode not in {"off", "audit", "annotate"}:
+        raise typer.BadParameter("--speech must be off, audit, or annotate")
+    if sequence_fallback not in {"preserve", "spell"}:
+        raise typer.BadParameter("--sequence-fallback must be preserve or spell")
+    if speech_mode == "off" and strict_speech:
+        raise typer.BadParameter("--strict-speech requires --speech audit or annotate")
+    if speech_mode == "off" and pronunciations is not None:
+        raise typer.BadParameter("--pronunciations requires --speech audit or annotate")
+    if speech_mode == "off" and speech_language is not None:
+        raise typer.BadParameter("--speech-language requires --speech audit or annotate")
+    if speech_mode == "off" and sequence_fallback != "spell":
+        raise typer.BadParameter("--sequence-fallback requires --speech audit or annotate")
+
     try:
-        result = Converter().convert(source, title=title, author=author, language=language)
+        pronunciation_map = _load_pronunciations(pronunciations) if pronunciations else {}
+        needs_speech_options = speech_mode != "off" or speech_report is not None
+        speech_options = (
+            SpeechPreparationOptions(
+                mode=speech_mode,
+                language=speech_language or language,
+                strict=strict_speech,
+                sequence_fallback_mode=sequence_fallback,
+                pronunciations=pronunciation_map,
+            )
+            if needs_speech_options
+            else None
+        )
+        result = Converter().convert(
+            source,
+            title=title,
+            author=author,
+            language=language,
+            speech_options=speech_options,
+        )
     except (SSMDConvertError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
+
     destination = output or source.with_suffix(".ssmd")
     destination.write_text(result.ssmd, encoding="utf-8", newline="\n")
+    if speech_report is not None:
+        if result.speech_report is None:
+            raise RuntimeError("speech report was requested but not produced")
+        speech_report.write_text(
+            result.speech_report.to_json() + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
     typer.echo(f"Converted {source} -> {destination}")
+    if speech_report is not None:
+        typer.echo(f"Speech report -> {speech_report}")
     typer.echo("Local conversion: no content was sent to JEV.")
 
 
@@ -99,8 +211,35 @@ def book(
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     chapters: Annotated[str, typer.Option("--chapters")] = "all",
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    speech_mode: Annotated[
+        str,
+        typer.Option("--speech", help="Speech preparation: off, audit, or annotate."),
+    ] = "off",
+    speech_language: Annotated[str | None, typer.Option("--speech-language")] = None,
+    strict_speech: Annotated[
+        bool,
+        typer.Option("--strict-speech/--no-strict-speech"),
+    ] = False,
+    sequence_fallback: Annotated[
+        str,
+        typer.Option("--sequence-fallback", help="Sequence fallback: preserve or spell."),
+    ] = "spell",
+    pronunciations: Annotated[
+        Path | None,
+        typer.Option("--pronunciations", exists=True, dir_okay=False, readable=True),
+    ] = None,
+    speech_report: Annotated[Path | None, typer.Option("--speech-report")] = None,
 ) -> None:
     """Inspect EPUB chapters, create book bundles, or validate bundles."""
+    if source_or_action in {"chapters", "validate"} and (
+        speech_mode.lower() != "off"
+        or speech_language is not None
+        or strict_speech
+        or sequence_fallback.lower() != "spell"
+        or pronunciations is not None
+        or speech_report is not None
+    ):
+        raise typer.BadParameter("speech options apply only to book conversion")
     try:
         if source_or_action == "chapters":
             if source is None:
@@ -138,14 +277,63 @@ def book(
             return
         if source is not None:
             raise typer.BadParameter("book conversion accepts one EPUB SOURCE followed by options")
+        speech_mode = speech_mode.lower()
+        sequence_fallback = sequence_fallback.lower()
+        if speech_mode not in {"off", "audit", "annotate"}:
+            raise typer.BadParameter("--speech must be off, audit, or annotate")
+        if sequence_fallback not in {"preserve", "spell"}:
+            raise typer.BadParameter("--sequence-fallback must be preserve or spell")
+        if speech_mode == "off" and strict_speech:
+            raise typer.BadParameter("--strict-speech requires --speech audit or annotate")
+        if speech_mode == "off" and pronunciations is not None:
+            raise typer.BadParameter("--pronunciations requires --speech audit or annotate")
+        if speech_mode == "off" and speech_language is not None:
+            raise typer.BadParameter("--speech-language requires --speech audit or annotate")
+        if speech_mode == "off" and sequence_fallback != "spell":
+            raise typer.BadParameter("--sequence-fallback requires --speech audit or annotate")
+
         source_path = Path(source_or_action)
-        book_data = convert_book(source_path, chapters=chapters)
+        pronunciation_map = _load_pronunciations(pronunciations) if pronunciations else {}
+        needs_speech_options = speech_mode != "off" or speech_report is not None
+        speech_options = (
+            SpeechPreparationOptions(
+                mode=speech_mode,
+                language=speech_language,
+                strict=strict_speech,
+                sequence_fallback_mode=sequence_fallback,
+                pronunciations=pronunciation_map,
+            )
+            if needs_speech_options
+            else None
+        )
+        book_data = convert_book(
+            source_path,
+            chapters=chapters,
+            speech_options=speech_options,
+        )
         destination = output or source_path.with_suffix(".ssmdbook")
         written = write_book_bundle(book_data, destination)
+        report_path = speech_report
+        if report_path is None and speech_mode != "off":
+            report_path = written.with_name(written.name + ".speech-report.json")
+        if report_path is not None:
+            report_path.write_text(
+                json.dumps(
+                    _book_speech_report_payload(book_data),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
     except (SSMDConvertError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Created SSMD book bundle: {written}")
     typer.echo(f"Chapters: {len(book_data.chapters)}")
+    if report_path is not None:
+        typer.echo(f"Speech report: {report_path}")
 
 
 @app.command()

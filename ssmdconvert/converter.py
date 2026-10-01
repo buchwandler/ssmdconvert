@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from .adapters import InputAdapter, default_adapters
 from .books import convert_book as _convert_book
 from .errors import UnsupportedInputError
 from .models import Book, ConversionResult, Document
 from .render import render_document
+from .speech import SpeechPreparationOptions, prepare_ssmd_for_speech
 
 
 class Converter:
@@ -39,9 +41,10 @@ class Converter:
         source: str | Path,
         *,
         chapters: str | None = "all",
+        speech_options: SpeechPreparationOptions | None = None,
     ) -> Book:
         """Convert selected EPUB chapters into standalone SSMD documents."""
-        return _convert_book(source, chapters=chapters)
+        return _convert_book(source, chapters=chapters, speech_options=speech_options)
 
     def convert(
         self,
@@ -50,6 +53,7 @@ class Converter:
         title: str | None = None,
         author: str | None = None,
         language: str | None = None,
+        speech_options: SpeechPreparationOptions | None = None,
     ) -> ConversionResult:
         """Convert a source into one combined SSMD document."""
         document = self.load(source)
@@ -59,9 +63,15 @@ class Converter:
             document.metadata["author"] = author
         if language is not None:
             document.metadata["language"] = language
-        return ConversionResult(document=document, ssmd=render_document(document))
+        ssmd = render_document(document)
+        speech_report = None
+        if speech_options is not None:
+            speech_result = prepare_ssmd_for_speech(ssmd, options=speech_options)
+            ssmd = speech_result.ssmd
+            speech_report = speech_result.report
+        return ConversionResult(document=document, ssmd=ssmd, speech_report=speech_report)
 
 
-def convert(source: str | Path, **kwargs: object) -> ConversionResult:
+def convert(source: str | Path, **kwargs: Any) -> ConversionResult:
     """Convert a source path with the default adapters."""
     return Converter().convert(source, **kwargs)

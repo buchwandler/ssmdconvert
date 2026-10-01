@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .speech.models import SpeechPreparationReport
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +47,7 @@ class ConversionResult:
     document: Document
     ssmd: str
     warnings: list[str] = field(default_factory=list)
+    speech_report: SpeechPreparationReport | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +77,11 @@ class Book:
     source_chapter_count: int | None = None
     source_name: str | None = None
     source_sha256: str | None = None
+    speech_reports: Mapping[str, SpeechPreparationReport] = field(
+        default_factory=dict,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True, slots=True)

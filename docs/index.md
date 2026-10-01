@@ -1,6 +1,6 @@
 # ssmdconvert Documentation
 
-`ssmdconvert` converts documents and EPUB books into SSMD 0.9. Core conversion and inspection run locally. Optional semantic enrichment is separate and requires explicit acknowledgement before selected content is sent to a configured JEV backend.
+`ssmdconvert` converts documents and EPUB books into SSMD 0.9. Core conversion and inspection run locally. Optional `spokenform` speech preparation and Unicode QC are opt-in and remain local; JEV semantic enrichment is separate and requires explicit acknowledgement before selected content is sent to a configured backend.
 
 Install the core package with:
 

@@ -12,6 +12,7 @@ def make_epub(
     nested_navigation: bool = False,
     duplicate_visible_titles: bool = False,
     include_empty_spine_item: bool = False,
+    chapter_one_suffix: str = "",
 ) -> None:
     book = epub.EpubBook()
     book.set_identifier("demo-id")
@@ -26,7 +27,7 @@ def make_epub(
         "<body><h1>One</h1><h2>Opening</h2>"
         "<p>Hello, 世界, <em>emphasis</em> and <strong>strong</strong>, "
         '<span style="font-style: italic">CSS emphasis</span>, '
-        '<a href="https://example.test"><em>linked text</em></a>.</p>'
+        '<a href="https://example.test"><em>linked text</em></a>.' + chapter_one_suffix + "</p>"
         "<hr/><p>After the break.</p></body></html>"
     )
     chapter_two = epub.EpubHtml(

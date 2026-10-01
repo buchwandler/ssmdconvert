@@ -15,6 +15,8 @@ python -m pip install ssmdconvert
 
 The core install supports text, Markdown, HTML, EPUB, and SSMD inputs. It does not require JEV or Readio.
 
+The core install includes the local `spokenform` backend used by opt-in speech preparation and QC. It performs no cloud calls; JEV enrichment remains a separate optional extra.
+
 ## Optional extras
 
 Install PDF text extraction or DOCX support when needed:

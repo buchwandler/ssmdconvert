@@ -17,6 +17,11 @@ from .models import (
     SourceInfo,
 )
 from .render import render_standalone_chapter
+from .speech import (
+    SpeechPreparationOptions,
+    SpeechPreparationReport,
+    prepare_ssmd_for_speech,
+)
 
 
 def _source_metadata(value: Metadata) -> dict[str, Any]:
@@ -90,10 +95,55 @@ def inspect_book(source: str | Path) -> BookInspection:
     return inspection
 
 
+def _speech_diagnostics(report: SpeechPreparationReport) -> tuple[dict[str, Any], ...]:
+    """Project speech report findings into existing bundle diagnostics."""
+    diagnostics: list[dict[str, Any]] = []
+    for issue in report.issues:
+        item: dict[str, Any] = {
+            "kind": "speech",
+            "code": issue.code,
+            "severity": issue.severity,
+            "message": issue.message,
+        }
+        if issue.source_start is not None:
+            item["source_start"] = issue.source_start
+        if issue.source_end is not None:
+            item["source_end"] = issue.source_end
+        if issue.codepoint is not None:
+            item["codepoint"] = issue.codepoint
+        diagnostics.append(item)
+    for change in report.changes:
+        if change.status != "skipped" or change.reason == "audit mode does not modify source":
+            continue
+        item = {
+            "kind": "speech",
+            "code": "speech.replacement_skipped",
+            "severity": "warning",
+            "message": change.reason or "Speech replacement was skipped.",
+            "source_text": change.source_text,
+        }
+        if change.source_start is not None:
+            item["source_start"] = change.source_start
+        if change.source_end is not None:
+            item["source_end"] = change.source_end
+        diagnostics.append(item)
+    diagnostics.extend(
+        {
+            "kind": "speech",
+            "code": "speech.warning",
+            "severity": "warning",
+            "message": warning,
+        }
+        for warning in report.warnings
+    )
+    return tuple(diagnostics)
+
+
 def convert_book(
     source: str | Path,
     *,
     chapters: str | None = "all",
+    speech_options: SpeechPreparationOptions | None = None,
 ) -> Book:
     """Convert selected EPUB chapters to standalone SSMD in source order."""
     inspection, source_documents = _inspect_epub(source)
@@ -103,6 +153,7 @@ def convert_book(
     )
     selected = set(selected_numbers)
     book_chapters: list[BookChapter] = []
+    speech_reports: dict[str, SpeechPreparationReport] = {}
 
     for chapter, source_document in zip(inspection.chapters, source_documents, strict=True):
         if chapter.source_number not in selected:
@@ -114,6 +165,17 @@ def convert_book(
             raise BookError(
                 f"generated SSMD for source chapter {chapter.source_number} is invalid: {exc}"
             ) from exc
+        diagnostics = chapter.diagnostics
+        if speech_options is not None:
+            try:
+                speech_result = prepare_ssmd_for_speech(ssmd, options=speech_options)
+            except ValueError as exc:
+                raise BookError(
+                    f"speech preparation for source chapter {chapter.source_number} failed: {exc}"
+                ) from exc
+            ssmd = speech_result.ssmd
+            speech_reports[chapter.id] = speech_result.report
+            diagnostics = (*diagnostics, *_speech_diagnostics(speech_result.report))
         book_chapters.append(
             BookChapter(
                 id=chapter.id,
@@ -125,7 +187,7 @@ def convert_book(
                 parent_id=chapter.parent_id,
                 level=chapter.level,
                 char_count=chapter.char_count,
-                diagnostics=chapter.diagnostics,
+                diagnostics=diagnostics,
             )
         )
 
@@ -134,4 +196,5 @@ def convert_book(
         metadata=inspection.metadata,
         chapters=tuple(book_chapters),
         source_chapter_count=len(inspection.chapters),
+        speech_reports=speech_reports,
     )

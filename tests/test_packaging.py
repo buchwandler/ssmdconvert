@@ -27,3 +27,13 @@ def test_packaging_metadata_matches_release_policy() -> None:
     extras = data["project"]["optional-dependencies"]
     assert "sfx" not in extras
     assert all("sfxrender" not in dependency for dependency in extras["all"])
+
+
+def test_speech_preparation_dependencies_are_bounded() -> None:
+    root = Path(__file__).resolve().parents[1]
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = data["project"]["dependencies"]
+
+    assert "ssmd>=0.9.3,<0.10" in dependencies
+    assert "spokenform>=0.4.3,<0.5" in dependencies
+    assert "tomli>=2; python_version < '3.11'" in dependencies

@@ -31,6 +31,34 @@ ssmdconvert convert manuscript.txt \
 
 Core conversion is local and does not send content to JEV.
 
+## Opt-in speech preparation and QC
+
+Speech preparation is disabled by default. The default conversion path does not call `spokenform` and emits the same SSMD as before. Opt in to a report-only audit or safe SSMD annotations:
+
+```bash
+ssmdconvert convert chapter.txt \
+  --language en \
+  --speech audit \
+  --speech-report chapter.speech-report.json
+
+ssmdconvert convert chapter.txt \
+  --language en \
+  --speech annotate \
+  --sequence-fallback spell \
+  --pronunciations pronunciations.json \
+  --speech-report chapter.speech-report.json
+```
+
+`--speech` accepts `off` (the default), `audit`, or `annotate`. Audit leaves the document unchanged and records candidate pronunciations, skipped mappings, warnings, and QC issues. Annotate wraps only exact, safely mapped candidates in SSMD `sub` annotations; visible source text stays unchanged. For example, the written `5 kg` can be emitted as `[5 kg]{sub="five kilograms"}`.
+
+The effective speech language is selected from an enclosing inline `lang`/`language` annotation, `--speech-language`, `--language`, and document language metadata, in that precedence order. `--language` also sets output metadata; `--speech-language` only overrides speech preparation. A run without a language is skipped and reported; annotation fails if no run has an effective language. Audit without one still performs character QC.
+
+Pronunciation files may be JSON (`{"H2O": "water"}`) or TOML (`[pronunciations]` followed by `H2O = "water"`). Glossary terms are matched literally and case-sensitively, and take precedence over generic normalization. `--sequence-fallback` accepts `preserve` or `spell` (default `spell`).
+
+Existing author `sub`, `as`/`say-as`, and `ph`/`phonemes` annotations remain authoritative. Generated `sub` retains the written form while supplying a spoken alias. Existing `say-as` behavior depends on the downstream consumer/provider; `ssmdconvert` does not claim uniform provider support or replace author instructions.
+
+Reports flag U+FFFD, unresolved symbols, private-use/noncharacter/control characters, and unusual punctuation without deleting or guessing at them. `--strict-speech` makes error-level QC findings, including U+FFFD, fail conversion. All speech preparation and QC run locally through `spokenform`; they do not send content to JEV or another cloud service.
+
 ## Inspect a source
 
 Inspect the local adapter and normalized sections without writing output:
@@ -44,14 +72,14 @@ Inspection reports the selected adapter, normalized section titles, character co
 
 ## Supported inputs
 
-| Format | Install | Notes |
-|---|---|---|
-| TXT | core | Plain-text section splitting |
-| Markdown | core | Normalized into source-neutral sections |
-| HTML | core | Converted to normalized Markdown and SSMD |
-| EPUB | core | Chapter extraction delegates to `epub2text` |
-| SSMD | core | Parsed and re-emitted as SSMD 0.9 |
-| PDF | `[pdf]` | `pypdf` text extraction; no OCR for scanned pages |
-| DOCX | `[docx]` | Extracts paragraphs and headings; complex floating layout is ignored |
+| Format   | Install  | Notes                                                                |
+| -------- | -------- | -------------------------------------------------------------------- |
+| TXT      | core     | Plain-text section splitting                                         |
+| Markdown | core     | Normalized into source-neutral sections                              |
+| HTML     | core     | Converted to normalized Markdown and SSMD                            |
+| EPUB     | core     | Chapter extraction delegates to `epub2text`                          |
+| SSMD     | core     | Parsed and re-emitted as SSMD 0.9                                    |
+| PDF      | `[pdf]`  | `pypdf` text extraction; no OCR for scanned pages                    |
+| DOCX     | `[docx]` | Extracts paragraphs and headings; complex floating layout is ignored |
 
 Chapter-aware EPUB conversion and bundle commands are described in [Books](books.md).
