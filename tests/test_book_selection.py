@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from ssmdconvert import ChapterSelectionError, parse_chapter_selection
+from ssmdconvert import ChapterSelectionError
+from ssmdconvert.chapter_selection import parse_chapter_selection
 
 AVAILABLE = (1, 2, 3, 4, 5, 7, 9, 10)
 

@@ -5,14 +5,14 @@ from pathlib import Path
 from ssmd import parse_front_matter
 
 from ..models import Document, Section, SourceInfo
-from .common import read_text_file
+from .common import is_ssmd_path, read_text_file
 
 
 class SsmdAdapter:
     name = "ssmd"
 
     def supports(self, source: Path) -> bool:
-        return source.suffix.lower() == ".ssmd"
+        return is_ssmd_path(source)
 
     def load(self, source: Path) -> Document:
         raw = read_text_file(source)
@@ -20,7 +20,9 @@ class SsmdAdapter:
         metadata = dict(parsed.data) if parsed.present else {}
         metadata.setdefault("title", source.stem)
         return Document(
-            source=SourceInfo(source, "ssmd", "text/markdown"),
+            source=SourceInfo(
+                format="ssmd", media_type="text/markdown", path=source, name=source.name
+            ),
             sections=[Section("section-0001", parsed.body if parsed.present else raw)],
             metadata=metadata,
         )

@@ -42,9 +42,10 @@ class DocxAdapter:
             metadata["author"] = props.author
         return Document(
             source=SourceInfo(
-                source,
-                "docx",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                format="docx",
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                path=source,
+                name=source.name,
             ),
             sections=[Section("section-0001", "\n".join(lines).strip())],
             metadata=metadata,

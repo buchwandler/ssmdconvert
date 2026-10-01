@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from ..models import Document, Section, SourceInfo
-from .common import read_text_file
+from .common import is_ssmd_path, read_text_file
 
 _H1_RE = re.compile(r"^#\s+(.+?)\s*$")
 
@@ -32,7 +32,7 @@ class MarkdownAdapter:
     suffixes = {".md", ".markdown", ".mdown", ".mkd"}
 
     def supports(self, source: Path) -> bool:
-        return source.suffix.lower() in self.suffixes
+        return source.suffix.lower() in self.suffixes and not is_ssmd_path(source)
 
     def load(self, source: Path) -> Document:
         text = read_text_file(source)
@@ -42,7 +42,9 @@ class MarkdownAdapter:
             if body
         ]
         return Document(
-            source=SourceInfo(source, "markdown", "text/markdown"),
+            source=SourceInfo(
+                format="markdown", media_type="text/markdown", path=source, name=source.name
+            ),
             sections=sections or [Section("section-0001", "")],
             metadata={"title": source.stem},
         )

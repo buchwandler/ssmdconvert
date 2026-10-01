@@ -21,7 +21,9 @@ class TextAdapter:
             if body
         ]
         return Document(
-            source=SourceInfo(source, "text", "text/plain"),
+            source=SourceInfo(
+                format="text", media_type="text/plain", path=source, name=source.name
+            ),
             sections=sections or [Section("section-0001", "")],
             metadata={"title": source.stem},
         )

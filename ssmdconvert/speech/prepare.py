@@ -8,10 +8,15 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Literal
 
 import spokenform
-from ssmd import AnnotationSpan, ParseStructureResult, TextSpan, parse_structure
+from ssmd import AnnotationSpan, ParseStructureResult, parse_structure
 
 from ..render import validate_ssmd_document
-from .audit import audit_residual_characters, source_range_for_clean_span
+from .audit import (
+    TextSpan,
+    audit_residual_characters,
+    source_range_for_clean_span,
+    text_spans,
+)
 from .escaping import format_sub_annotation
 from .models import (
     SpeechChange,
@@ -356,12 +361,11 @@ def prepare_ssmd_for_speech(
 
     validate_ssmd_document(source)
     structure = parse_structure(source, dialect="0.9", normalize=False)
+    spans = text_spans(source, structure)
     protected_spans = [
-        span
-        for span in structure.text_spans
-        if _is_authoritatively_protected(span, structure.annotations)
+        span for span in spans if _is_authoritatively_protected(span, structure.annotations)
     ]
-    plain_spans = [span for span in structure.text_spans if span not in protected_spans]
+    plain_spans = [span for span in spans if span not in protected_spans]
     languages: list[str] = []
     changes: list[SpeechChange] = []
     warnings: list[str] = []

@@ -5,19 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from .speech.models import SpeechPreparationReport
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
 class SourceInfo:
-    """Identity and media type for a converted source."""
+    """Source format and provenance, with a path only when locally available."""
 
-    path: Path
     format: str
     media_type: str | None = None
+    path: Path | None = None
+    name: str | None = None
 
 
 @dataclass(slots=True)
@@ -40,14 +38,12 @@ class Document:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class ConversionResult:
-    """Rendered SSMD with its normalized document and conversion warnings."""
+    """Rendered SSMD and its normalized document."""
 
     document: Document
     ssmd: str
-    warnings: list[str] = field(default_factory=list)
-    speech_report: SpeechPreparationReport | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,11 +56,11 @@ class BookChapter:
     ssmd: str
     source_id: str | None = None
     href: str | None = None
+    source_parent_id: str | None = None
     parent_id: str | None = None
     level: int = 1
     char_count: int | None = None
     diagnostics: tuple[Mapping[str, Any], ...] = ()
-    bundle_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,14 +70,8 @@ class Book:
     source: SourceInfo
     metadata: Mapping[str, Any]
     chapters: tuple[BookChapter, ...]
+    source_sha256: str
     source_chapter_count: int | None = None
-    source_name: str | None = None
-    source_sha256: str | None = None
-    speech_reports: Mapping[str, SpeechPreparationReport] = field(
-        default_factory=dict,
-        compare=False,
-        repr=False,
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +83,7 @@ class BookInspectionChapter:
     title: str
     source_id: str | None = None
     href: str | None = None
+    source_parent_id: str | None = None
     parent_id: str | None = None
     level: int = 1
     char_count: int | None = None
@@ -103,7 +94,6 @@ class BookInspectionChapter:
 class BookInspection:
     """Source metadata and ordered chapter inventory for a book."""
 
-    source: Path
-    source_format: str
+    source: SourceInfo
     metadata: Mapping[str, Any]
     chapters: tuple[BookInspectionChapter, ...]

@@ -152,7 +152,7 @@ class HtmlAdapter:
         markdown, title, first_heading = html_to_markdown(read_text_file(source))
         metadata = {"title": title or first_heading or source.stem}
         return Document(
-            source=SourceInfo(source, "html", "text/html"),
+            source=SourceInfo(format="html", media_type="text/html", path=source, name=source.name),
             sections=[Section("section-0001", markdown, first_heading)],
             metadata=metadata,
         )

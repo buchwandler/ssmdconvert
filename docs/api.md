@@ -1,6 +1,6 @@
 # Python API
 
-The names documented here are exported from `ssmdconvert` and listed in `ssmdconvert.__all__`.
+The core names documented here are exported from `ssmdconvert` and listed in `ssmdconvert.__all__`.
 
 ## Conversion
 
@@ -16,58 +16,7 @@ The names documented here are exported from `ssmdconvert` and listed in `ssmdcon
 :members:
 ```
 
-## Speech preparation and quality control
-
-Speech settings are passed as an immutable options value. `SpeechPreparationOptions()` defaults to `mode="off"`; normal conversion is unchanged unless audit or annotation is explicitly requested.
-
-```python
-from ssmdconvert import Converter, SpeechPreparationOptions
-
-result = Converter().convert(
-    "chapter.txt",
-    language="en",
-    speech_options=SpeechPreparationOptions(
-        mode="annotate",
-        strict=False,
-        sequence_fallback_mode="spell",
-        pronunciations={"H2O": "water"},
-    ),
-)
-print(result.ssmd)
-print(result.speech_report.to_json() if result.speech_report else "no report")
-```
-
-Inline `lang`/`language` annotations take precedence over `SpeechPreparationOptions.language`, which takes precedence over SSMD document language metadata. When no language is available, audit reports a warning and still checks Unicode; annotation fails if no text run has an effective language. Existing `sub`, `as`/`say-as`, and `ph`/`phonemes` annotations are protected. Generated pronunciations use `sub`, preserving visible written text.
-
-Audit does not modify SSMD. Annotation only wraps exact source slices when public `ssmd.TextSpan` coordinates prove the mapping safe; it validates output and verifies visible text is unchanged. Overlaps, cross-run candidates, source mismatches, and inexact escaped mappings are skipped and reported. The report includes backend/version, languages, source-coordinate changes, warnings, and residual Unicode issues. U+FFFD is an error; `strict=True` raises on error-level QC findings. Processing is local and makes no cloud/JEV calls.
-
-`pronunciations` is a literal, case-sensitive source-to-spoken mapping. Project terms take precedence over generic normalization. `sequence_fallback_mode` accepts `"preserve"` or `"spell"`.
-
-```{autoclass} ssmdconvert.SpeechPreparationOptions
-:members:
-```
-
-```{autoclass} ssmdconvert.SpeechPreparationResult
-:members:
-```
-
-```{autoclass} ssmdconvert.SpeechPreparationReport
-:members:
-```
-
-```{autoclass} ssmdconvert.SpeechChange
-:members:
-```
-
-```{autoclass} ssmdconvert.SpeechIssue
-:members:
-```
-
-```{autofunction} ssmdconvert.prepare_ssmd_for_speech
-
-```
-
-For EPUB chapter conversion, `Converter.convert_book(..., speech_options=...)` returns a transient `Book.speech_reports` mapping keyed by selected chapter ID. The book CLI writes detailed JSON sidecars; see [Books](books.md#speech-preparation-and-reports).
+`Converter.convert()` returns one combined SSMD document. Input paths ending in `.ssmd` or `.ssmd.md` are recognized case-insensitively and parsed as SSMD before being rendered.
 
 ## Source-neutral models
 
@@ -82,6 +31,8 @@ For EPUB chapter conversion, `Converter.convert_book(..., speech_options=...)` r
 ```{autoclass} ssmdconvert.Document
 :members:
 ```
+
+`SourceInfo.path` is populated when the source is locally available. Bundle-loaded provenance keeps its source name, format, and media type, but has no local path.
 
 ## Books and chapters
 
@@ -109,9 +60,7 @@ For EPUB chapter conversion, `Converter.convert_book(..., speech_options=...)` r
 
 ```
 
-```{autofunction} ssmdconvert.parse_chapter_selection
-
-```
+`BookChapter.id` is the canonical chapter identity. `source_id` and `source_parent_id` preserve source navigation identifiers; `parent_id` refers to the canonical parent chapter ID when present in the inventory. `Book.source_sha256` is captured during conversion.
 
 ## Bundles
 
@@ -127,7 +76,21 @@ For EPUB chapter conversion, `Converter.convert_book(..., speech_options=...)` r
 
 ```
 
+The writer requires `format="directory"` or `format="zip"`. Existing destinations are refused unless `overwrite=True` is supplied. See [Bundle format](bundle-format.md) for atomic replacement, validation, and resource limits.
+
 ## Errors
+
+```{autoclass} ssmdconvert.SSMDConvertError
+
+```
+
+```{autoclass} ssmdconvert.UnsupportedInputError
+
+```
+
+```{autoclass} ssmdconvert.MissingDependencyError
+
+```
 
 ```{autoclass} ssmdconvert.BookError
 
@@ -146,6 +109,43 @@ For EPUB chapter conversion, `Converter.convert_book(..., speech_options=...)` r
 ```
 
 ```{autoclass} ssmdconvert.BookBundleValidationError
+
+```
+
+## Optional speech preparation
+
+Install the `[speech]` extra before importing `ssmdconvert.speech`. These APIs are separate from core conversion and do not alter conversion output unless called explicitly.
+
+```python
+from ssmdconvert.speech import SpeechPreparationOptions, prepare_ssmd_for_speech
+
+result = prepare_ssmd_for_speech(
+    source_ssmd,
+    options=SpeechPreparationOptions(mode="annotate", language="en"),
+)
+```
+
+```{autoclass} ssmdconvert.speech.SpeechPreparationOptions
+:members:
+```
+
+```{autoclass} ssmdconvert.speech.SpeechPreparationResult
+:members:
+```
+
+```{autoclass} ssmdconvert.speech.SpeechPreparationReport
+:members:
+```
+
+```{autoclass} ssmdconvert.speech.SpeechChange
+:members:
+```
+
+```{autoclass} ssmdconvert.speech.SpeechIssue
+:members:
+```
+
+```{autofunction} ssmdconvert.speech.prepare_ssmd_for_speech
 
 ```
 

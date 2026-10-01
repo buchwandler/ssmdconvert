@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from epub_support import make_epub
 
-from ssmdconvert import ConversionResult, Converter
-from ssmdconvert.epub_options import default_epub_chapter_options
+from ssmdconvert import ConversionResult, Converter, convert_book
+from ssmdconvert._epub import _chapter_markdown_options, load_epub
 from ssmdconvert.errors import SSMDConvertError
 
 
@@ -47,7 +47,7 @@ def test_epub_spine_fallback_is_in_source_order(tmp_path: Path) -> None:
 def test_epub_chapter_options_are_centralized() -> None:
     from epub2text import ChapterMarkdownOptions
 
-    assert default_epub_chapter_options() == ChapterMarkdownOptions(
+    assert _chapter_markdown_options() == ChapterMarkdownOptions(
         include_title=False,
         minimum_body_heading_level=2,
         preserve_emphasis=True,
@@ -92,3 +92,23 @@ def test_empty_spine_items_do_not_disrupt_chapter_order(tmp_path: Path) -> None:
         "c2.xhtml",
     ]
     assert result.ssmd.index("Hello") < result.ssmd.index("World")
+
+
+def test_generic_and_book_conversion_share_epub_extraction(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    make_epub(source)
+    extracted = load_epub(source)
+    generic = Converter().convert(source)
+    book = convert_book(source)
+
+    assert (
+        generic.document.metadata["title"] == book.metadata["title"] == extracted.metadata["title"]
+    )
+    assert generic.document.metadata["author"] == book.metadata["authors"][0]
+    assert [section.id for section in generic.document.sections] == [
+        chapter.id for chapter in extracted.chapters
+    ]
+    assert [section.markdown for section in generic.document.sections] == [
+        chapter.markdown for chapter in extracted.chapters
+    ]
+    assert [chapter.source_number for chapter in book.chapters] == [1, 2]

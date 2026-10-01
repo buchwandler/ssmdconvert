@@ -1,27 +1,22 @@
 # ssmdconvert Documentation
 
-`ssmdconvert` converts documents and EPUB books into SSMD 0.9. Core conversion and inspection run locally. Optional `spokenform` speech preparation and Unicode QC are opt-in and remain local; JEV semantic enrichment is separate and requires explicit acknowledgement before selected content is sent to a configured backend.
+`ssmdconvert` converts common local documents and EPUB books into SSMD 0.9. The base package supports text, Markdown, HTML, EPUB, and SSMD. PDF, DOCX, and speech-preparation APIs are optional extras.
 
-Install the core package with:
-
-```bash
-python -m pip install ssmdconvert
-```
-
-Convert a document locally:
+Convert a document:
 
 ```bash
-ssmdconvert convert manuscript.txt -o manuscript.ssmd
+ssmdconvert convert manuscript.md -o manuscript.ssmd
 ```
 
-For chapter-aware EPUB workflows, inspect a source and write an ordered book bundle:
+Inspect EPUB chapters or create a chapter-aware bundle:
 
 ```bash
-ssmdconvert book chapters novel.epub
-ssmdconvert book novel.epub -o novel.ssmdbook
+ssmdconvert book inspect novel.epub --json
+ssmdconvert book convert novel.epub -o novel.ssmdbook
+ssmdconvert book validate novel.ssmdbook
 ```
 
-Python 3.10 or newer is supported.
+The CLI refuses to overwrite existing output unless `--force` is supplied. Output writes are atomic, and forced directory-bundle writes replace the complete prior bundle.
 
 ```{toctree}
 :maxdepth: 2
@@ -31,7 +26,6 @@ installation
 usage
 books
 bundle-format
-enrichment
 api
 changelog
 ```

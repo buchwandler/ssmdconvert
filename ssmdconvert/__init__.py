@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from .books import convert_book, inspect_book
 from .bundle import load_book_bundle, validate_book_bundle, write_book_bundle
-from .chapter_selection import parse_chapter_selection
 from .converter import Converter, convert
 from .errors import (
     BookBundleError,
     BookBundleValidationError,
     BookError,
     ChapterSelectionError,
+    MissingDependencyError,
+    SSMDConvertError,
     UnsupportedBookSourceError,
+    UnsupportedInputError,
 )
 from .models import (
     Book,
@@ -22,14 +24,6 @@ from .models import (
     Document,
     Section,
     SourceInfo,
-)
-from .speech import (
-    SpeechChange,
-    SpeechIssue,
-    SpeechPreparationOptions,
-    SpeechPreparationReport,
-    SpeechPreparationResult,
-    prepare_ssmd_for_speech,
 )
 
 try:
@@ -54,21 +48,17 @@ __all__ = [
     "ConversionResult",
     "Converter",
     "Document",
+    "MissingDependencyError",
+    "SSMDConvertError",
     "Section",
     "SourceInfo",
-    "SpeechChange",
-    "SpeechIssue",
-    "SpeechPreparationOptions",
-    "SpeechPreparationReport",
-    "SpeechPreparationResult",
     "UnsupportedBookSourceError",
+    "UnsupportedInputError",
     "__version__",
     "convert",
-    "prepare_ssmd_for_speech",
     "convert_book",
     "inspect_book",
     "load_book_bundle",
-    "parse_chapter_selection",
     "validate_book_bundle",
     "write_book_bundle",
 ]

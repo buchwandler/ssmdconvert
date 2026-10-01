@@ -37,5 +37,17 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: python tools/check_release_artifacts.py
+      - name: Install and smoke-test the built wheel
+        run: |
+          smoke_env="$RUNNER_TEMP/ssmdconvert-wheel-smoke"
+          python -m venv "$smoke_env"
+          "$smoke_env/bin/python" -m pip install --upgrade pip
+          "$smoke_env/bin/python" -m pip install "$GITHUB_WORKSPACE"/dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$smoke_env/bin/python" -c "import ssmdconvert; print(ssmdconvert.__version__)"
+          "$smoke_env/bin/ssmdconvert" --version
+          "$smoke_env/bin/ssmdconvert" --help
+          "$smoke_env/bin/python" "$GITHUB_WORKSPACE/tools/smoke_installed.py"
+          "$smoke_env/bin/python" -m pip check
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@v1.14.1

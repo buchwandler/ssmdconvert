@@ -9,6 +9,11 @@ _CHAPTER_RE = re.compile(
 )
 
 
+def is_ssmd_path(path: Path) -> bool:
+    name = path.name.lower()
+    return name.endswith((".ssmd", ".ssmd.md"))
+
+
 def read_text_file(path: Path) -> str:
     data = path.read_bytes()
     for encoding in ("utf-8-sig", "utf-8", "cp1252"):

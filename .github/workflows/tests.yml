@@ -57,7 +57,7 @@ jobs:
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
       - name: Install package and development dependencies
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install -e ".[dev,speech]"
       - name: Install documentation dependencies
         run: python -m pip install -r docs/requirements.txt
       - name: Build documentation
@@ -74,21 +74,21 @@ jobs:
           python-version: "3.13"
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
-      - name: Install the base package
+      - name: Install the base package without extras
         run: python -m pip install .
-      - name: Import package
-        run: python -c "import ssmdconvert"
-      - name: Smoke-test CLI
-        run: ssmdconvert --help
-      - name: Check installed version command
-        run: ssmdconvert --version
+      - name: Smoke-test installed core formats and book workflows
+        run: python tools/smoke_installed.py
+      - name: Check installed CLI entry point
+        run: |
+          ssmdconvert --version
+          ssmdconvert --help
 
   extras:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        extra: [pdf, docx, jev]
+        extra: [speech, pdf, docx]
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python
@@ -97,5 +97,46 @@ jobs:
           python-version: "3.13"
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
-      - name: Install published extra
-        run: python -m pip install -e ".[${{ matrix.extra }}]"
+      - name: Install package, tests, and selected extra
+        run: python -m pip install -e ".[dev,${{ matrix.extra }}]"
+      - name: Test speech extra
+        if: matrix.extra == 'speech'
+        run: python -m pytest tests/test_speech_preparation.py
+      - name: Test PDF extra import
+        if: matrix.extra == 'pdf'
+        run: python -c "import pypdf"
+      - name: Test DOCX extra adapter
+        if: matrix.extra == 'docx'
+        run: python -m pytest tests/test_optional_adapters.py
+
+  minimum-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+      - name: Install declared runtime dependency floors
+        run: python -m pip install "ssmd==0.9.2" "epub2text==0.2.8" "typer==0.20.*"
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Test core contracts at minimum dependency versions
+        run: >-
+          python -m pytest
+          tests/test_ssmd_adapter.py
+          tests/test_converter_api.py
+          tests/test_epub_adapter.py
+          tests/test_book_conversion.py
+          tests/test_book_inspection.py
+          tests/test_book_selection.py
+          tests/test_book_bundle.py
+          tests/test_cli.py
+      - name: Install speech dependency floor
+        run: |
+          python -m pip install "spokenform==0.4.3"
+          python -m pip install -e ".[speech]"
+      - name: Test speech extra at its minimum version
+        run: python -m pytest tests/test_speech_preparation.py

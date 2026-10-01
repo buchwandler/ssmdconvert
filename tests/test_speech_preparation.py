@@ -8,7 +8,7 @@ import pytest
 import spokenform
 from ssmd import parse_structure
 
-from ssmdconvert import (
+from ssmdconvert.speech import (
     SpeechPreparationOptions,
     prepare_ssmd_for_speech,
 )

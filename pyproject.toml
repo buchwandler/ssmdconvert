@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ssmdconvert"
 dynamic = ["version"]
-description = "Convert documents and books into SSMD, with optional semantic enrichment."
+description = "Deterministically convert documents and books into SSMD."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "Holger Nahrstaedt" }]
-keywords = ["ssmd", "tts", "audiobook", "conversion", "epub", "markdown", "pdf", "jev"]
+keywords = ["ssmd", "tts", "audiobook", "conversion", "epub", "markdown", "pdf"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -25,19 +25,18 @@ classifiers = [
   "Topic :: Text Processing :: Markup",
 ]
 dependencies = [
-  "ssmd>=0.9.3,<0.10",
+  "ssmd>=0.9.2,<0.10",
   "epub2text>=0.2.8,<0.3",
   "typer>=0.20,<1",
-  "spokenform>=0.4.3,<0.5",
   "tomli>=2; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
-jev = ["pyjev>=0,<1"]
+speech = ["spokenform>=0.4.3,<0.5"]
 pdf = ["pypdf>=5,<7"]
 docx = ["python-docx>=1.1,<2"]
 all = [
-  "pyjev>=0,<1",
+  "spokenform>=0.4.3,<0.5",
   "pypdf>=5,<7",
   "python-docx>=1.1,<2",
 ]

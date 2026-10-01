@@ -33,7 +33,9 @@ class PdfAdapter:
                 metadata["author"] = str(reader.metadata.author)
         text = "\n\n".join(parts)
         return Document(
-            source=SourceInfo(source, "pdf", "application/pdf"),
+            source=SourceInfo(
+                format="pdf", media_type="application/pdf", path=source, name=source.name
+            ),
             sections=[Section("section-0001", text)],
             metadata=metadata,
         )

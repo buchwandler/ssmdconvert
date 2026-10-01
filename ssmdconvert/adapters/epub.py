@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from epub2text import EPUBParser
-
-from ..epub_options import default_epub_chapter_options
-from ..errors import SSMDConvertError
+from .._epub import load_epub
 from ..models import Document, Section, SourceInfo
 
 
@@ -16,38 +13,28 @@ class EpubAdapter:
         return source.suffix.lower() == ".epub"
 
     def load(self, source: Path) -> Document:
-        try:
-            parser = EPUBParser(str(source))
-            chapters = parser.get_chapter_documents(options=default_epub_chapter_options())
-            epub_metadata = parser.get_metadata()
-        except (OSError, ValueError) as exc:
-            raise SSMDConvertError(f"Could not read EPUB {source.name}: {exc}") from exc
-
-        metadata: dict[str, str] = {"title": epub_metadata.title or source.stem}
-        if epub_metadata.authors:
-            metadata["author"] = epub_metadata.authors[0]
-        if epub_metadata.language:
-            metadata["language"] = epub_metadata.language
-        if epub_metadata.publisher:
-            metadata["publisher"] = epub_metadata.publisher
-        if epub_metadata.identifier:
-            metadata["identifier"] = epub_metadata.identifier
-
+        extracted = load_epub(source)
+        metadata = dict(extracted.metadata)
+        authors = metadata.pop("authors", [])
+        if authors:
+            metadata["author"] = authors[0]
         sections = [
             Section(
                 id=chapter.id,
-                markdown=chapter.to_markdown(include_title=True, title_level=1),
+                markdown=chapter.markdown,
                 title=chapter.title,
                 level=chapter.level,
                 source_ref=chapter.href,
             )
-            for chapter in chapters
+            for chapter in extracted.chapters
         ]
-        if not sections:
-            raise SSMDConvertError(f"EPUB did not yield any readable chapters: {source.name}")
-
         return Document(
-            source=SourceInfo(source, "epub", "application/epub+zip"),
+            source=SourceInfo(
+                format="epub",
+                media_type="application/epub+zip",
+                path=extracted.source,
+                name=extracted.source.name,
+            ),
             sections=sections,
             metadata=metadata,
         )

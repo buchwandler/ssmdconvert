@@ -15,8 +15,9 @@ def test_inspect_book_preserves_order_metadata_and_source_provenance(tmp_path: P
     inspection = inspect_book(source)
 
     assert isinstance(inspection, BookInspection)
-    assert inspection.source == source.resolve()
-    assert inspection.source_format == "epub"
+    assert inspection.source.path == source.resolve()
+    assert inspection.source.format == "epub"
+    assert inspection.source.name == source.name
     assert inspection.metadata == {
         "title": "Demo Book",
         "language": "en",
@@ -48,8 +49,10 @@ def test_inspect_book_preserves_nested_navigation_hierarchy(tmp_path: Path) -> N
     assert [chapter.title for chapter in chapters] == ["Part One", "One", "Two", "Three"]
     assert [chapter.level for chapter in chapters] == [1, 2, 2, 1]
     assert chapters[0].parent_id is None
-    assert chapters[1].parent_id == chapters[0].source_id
-    assert chapters[2].parent_id == chapters[0].source_id
+    assert chapters[1].source_parent_id == chapters[0].source_id
+    assert chapters[1].parent_id == chapters[0].id
+    assert chapters[2].source_parent_id == chapters[0].source_id
+    assert chapters[2].parent_id == chapters[0].id
     assert chapters[3].parent_id is None
 
 

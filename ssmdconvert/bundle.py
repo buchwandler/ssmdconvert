@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
 import stat
+import tempfile
 import zipfile
 import zlib
 from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Literal, NoReturn
 
 from .errors import BookBundleError, BookBundleValidationError
 from .models import Book, BookChapter, SourceInfo
@@ -21,8 +24,13 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _WINDOWS_DRIVE = re.compile(r"[A-Za-z]:")
 _FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 
+_MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+_MAX_CHAPTER_BYTES = 64 * 1024 * 1024
+_MAX_TOTAL_CHAPTER_BYTES = 512 * 1024 * 1024
+_MAX_ARCHIVE_MEMBERS = 10_000
 
-def _invalid(display: str, message: str) -> None:
+
+def _invalid(display: str, message: str) -> NoReturn:
     raise BookBundleValidationError(f"{display}: {message}")
 
 
@@ -95,6 +103,8 @@ def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
         _invalid(display, "manifest source must be a JSON object")
     if not isinstance(source.get("format"), str) or not source["format"]:
         _invalid(display, "source format must be a non-empty string")
+    if source.get("media_type") is not None and not isinstance(source["media_type"], str):
+        _invalid(display, "source media_type must be a string or null")
     _validate_source_name(source.get("name"), display)
     if not _is_sha256(source.get("sha256")):
         _invalid(display, "source sha256 must be a lowercase SHA256 digest")
@@ -147,7 +157,7 @@ def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
             for item in diagnostics
         ):
             _invalid(display, f"{label} diagnostics must be an array of JSON objects")
-        for key in ("source_id", "href", "parent_id"):
+        for key in ("source_id", "source_parent_id", "href", "parent_id"):
             if key in chapter and chapter[key] is not None and not isinstance(chapter[key], str):
                 _invalid(display, f"{label} {key} must be a string or null")
 
@@ -171,27 +181,18 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _manifest_for_book(book: Book) -> tuple[bytes, list[tuple[str, bytes]]]:
     if not isinstance(book, Book):
         raise BookBundleError("write_book_bundle requires a Book")
 
-    source_name = book.source_name or book.source.path.name
+    source_name = book.source.name
+    if source_name is None and book.source.path is not None:
+        source_name = book.source.path.name
+    if source_name is None:
+        raise BookBundleError("book source name is missing")
     source_sha256 = book.source_sha256
-    if source_sha256 is None:
-        if not book.source.path.is_file():
-            raise BookBundleError(f"source EPUB is unavailable for hashing: {book.source.path}")
-        try:
-            source_sha256 = _sha256_file(book.source.path)
-        except OSError as exc:
-            raise BookBundleError(f"could not hash source EPUB: {exc}") from exc
+    if not _is_sha256(source_sha256):
+        raise BookBundleError("book source SHA-256 is missing or invalid")
     source_chapter_count = (
         book.source_chapter_count if book.source_chapter_count is not None else len(book.chapters)
     )
@@ -218,11 +219,7 @@ def _manifest_for_book(book: Book) -> tuple[bytes, list[tuple[str, bytes]]]:
                     f"chapter {chapter.id!r} diagnostics must be mappings"
                 )
             diagnostics.append(dict(item))
-        path = (
-            chapter.bundle_path
-            if chapter.bundle_path is not None
-            else f"chapters/chapter-{chapter.source_number:04d}.ssmd.md"
-        )
+        path = f"chapters/{chapter.id}.ssmd.md"
         chapter_data.append((path, data))
         chapter_entries.append(
             {
@@ -231,6 +228,7 @@ def _manifest_for_book(book: Book) -> tuple[bytes, list[tuple[str, bytes]]]:
                 "path": path,
                 "title": chapter.title,
                 "source_id": chapter.source_id,
+                "source_parent_id": chapter.source_parent_id,
                 "href": chapter.href,
                 "parent_id": chapter.parent_id,
                 "level": chapter.level,
@@ -247,6 +245,7 @@ def _manifest_for_book(book: Book) -> tuple[bytes, list[tuple[str, bytes]]]:
         "metadata": dict(book.metadata),
         "source": {
             "format": book.source.format,
+            "media_type": book.source.media_type,
             "name": source_name,
             "sha256": source_sha256,
             "chapter_count": source_chapter_count,
@@ -275,7 +274,13 @@ def _is_below(path: Path, root: Path) -> bool:
     return True
 
 
-def _read_directory_file(root: Path, name: str, display: str) -> bytes:
+def _read_directory_file(
+    root: Path,
+    name: str,
+    display: str,
+    *,
+    max_bytes: int,
+) -> bytes:
     normalized = _validate_relative_path(name, display)
     target = root.joinpath(*PurePosixPath(normalized).parts)
     try:
@@ -287,9 +292,15 @@ def _read_directory_file(root: Path, name: str, display: str) -> bytes:
     if not resolved.is_file():
         _invalid(display, f"bundle entry is not a regular file: {name!r}")
     try:
-        return resolved.read_bytes()
+        size = resolved.stat().st_size
+        if size > max_bytes:
+            _invalid(display, f"bundle file {name!r} exceeds the size limit ({max_bytes} bytes)")
+        data = resolved.read_bytes()
     except OSError as exc:
         _invalid(display, f"could not read bundle file {name!r}: {exc}")
+    if len(data) > max_bytes:
+        _invalid(display, f"bundle file {name!r} exceeds the size limit ({max_bytes} bytes)")
+    return data
 
 
 def _read_directory_bundle(source: Path) -> Book:
@@ -298,13 +309,29 @@ def _read_directory_bundle(source: Path) -> Book:
         root = source.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         _invalid(display, f"could not resolve bundle directory: {exc}")
-    manifest_bytes = _read_directory_file(root, "manifest.json", display)
-    manifest = _parse_manifest(manifest_bytes, display)
-    return _book_from_manifest(
-        manifest,
-        lambda name: _read_directory_file(root, name, display),
+    manifest_bytes = _read_directory_file(
+        root,
+        "manifest.json",
         display,
+        max_bytes=_MAX_MANIFEST_BYTES,
     )
+    manifest = _parse_manifest(manifest_bytes, display)
+    total_chapter_bytes = 0
+
+    def read_chapter(name: str) -> bytes:
+        nonlocal total_chapter_bytes
+        data = _read_directory_file(
+            root,
+            name,
+            display,
+            max_bytes=_MAX_CHAPTER_BYTES,
+        )
+        total_chapter_bytes += len(data)
+        if total_chapter_bytes > _MAX_TOTAL_CHAPTER_BYTES:
+            _invalid(display, "referenced chapter files exceed the total size limit")
+        return data
+
+    return _book_from_manifest(manifest, read_chapter, display)
 
 
 def _validate_zip_member(info: zipfile.ZipInfo, display: str) -> None:
@@ -324,6 +351,8 @@ def _read_zip_bundle(source: Path) -> Book:
 
     with archive:
         infos = archive.infolist()
+        if len(infos) > _MAX_ARCHIVE_MEMBERS:
+            _invalid(display, "ZIP contains too many archive members")
         names = [info.filename for info in infos]
         if len(names) != len(set(names)):
             _invalid(display, "ZIP contains duplicate member names")
@@ -333,20 +362,36 @@ def _read_zip_bundle(source: Path) -> Book:
         manifest_info = members.get("manifest.json")
         if manifest_info is None or manifest_info.is_dir():
             _invalid(display, "ZIP is missing manifest.json")
+        if manifest_info.file_size > _MAX_MANIFEST_BYTES:
+            _invalid(display, "ZIP manifest.json exceeds the size limit")
         try:
             manifest_bytes = archive.read(manifest_info)
         except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
             _invalid(display, f"could not read ZIP manifest.json: {exc}")
+        if len(manifest_bytes) > _MAX_MANIFEST_BYTES:
+            _invalid(display, "ZIP manifest.json exceeds the size limit")
         manifest = _parse_manifest(manifest_bytes, display)
+        total_chapter_bytes = 0
 
         def read_member(name: str) -> bytes:
+            nonlocal total_chapter_bytes
             info = members.get(name)
             if info is None or info.is_dir():
                 _invalid(display, f"ZIP is missing chapter file {name!r}")
+            if info.file_size > _MAX_CHAPTER_BYTES:
+                _invalid(display, f"ZIP chapter {name!r} exceeds the size limit")
+            if total_chapter_bytes + info.file_size > _MAX_TOTAL_CHAPTER_BYTES:
+                _invalid(display, "referenced ZIP chapters exceed the total size limit")
             try:
-                return archive.read(info)
+                data = archive.read(info)
             except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
                 _invalid(display, f"could not read ZIP chapter {name!r}: {exc}")
+            if len(data) > _MAX_CHAPTER_BYTES:
+                _invalid(display, f"ZIP chapter {name!r} exceeds the size limit")
+            total_chapter_bytes += len(data)
+            if total_chapter_bytes > _MAX_TOTAL_CHAPTER_BYTES:
+                _invalid(display, "referenced ZIP chapters exceed the total size limit")
+            return data
 
         return _book_from_manifest(manifest, read_member, display)
 
@@ -379,26 +424,28 @@ def _book_from_manifest(
                 ssmd=ssmd,
                 source_id=entry.get("source_id"),
                 href=entry.get("href"),
+                source_parent_id=entry.get("source_parent_id"),
                 parent_id=entry.get("parent_id"),
                 level=entry["level"],
                 char_count=entry.get("char_count"),
                 diagnostics=tuple(dict(item) for item in entry["diagnostics"]),
-                bundle_path=path,
             )
         )
 
     return Book(
-        source=SourceInfo(Path(source["name"]), source["format"]),
+        source=SourceInfo(
+            format=source["format"],
+            media_type=source.get("media_type"),
+            name=source["name"],
+        ),
         metadata=dict(manifest["metadata"]),
         chapters=tuple(chapters),
-        source_chapter_count=source["chapter_count"],
-        source_name=source["name"],
         source_sha256=source["sha256"],
+        source_chapter_count=source["chapter_count"],
     )
 
 
 def _write_zip(target: Path, manifest: bytes, chapters: list[tuple[str, bytes]]) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(
         target,
         "w",
@@ -418,9 +465,6 @@ def _write_directory(
     manifest: bytes,
     chapters: list[tuple[str, bytes]],
 ) -> None:
-    if target.exists() and not target.is_dir():
-        raise BookBundleError(f"directory bundle output is not a directory: {target}")
-    target.mkdir(parents=True, exist_ok=True)
     root = target.resolve()
     for name, data in [("manifest.json", manifest), *chapters]:
         normalized = _validate_relative_path(name, str(target))
@@ -433,17 +477,106 @@ def _write_directory(
         destination.write_bytes(data)
 
 
-def write_book_bundle(book: Book, output: str | Path) -> Path:
-    """Write a Book as an editable directory or portable ZIP bundle."""
-    manifest, chapters = _manifest_for_book(book)
-    target = Path(output).expanduser().resolve()
+def _destination_exists(target: Path) -> bool:
+    return target.exists() or target.is_symlink()
+
+
+def _write_zip_atomic(
+    target: Path,
+    manifest: bytes,
+    chapters: list[tuple[str, bytes]],
+    *,
+    overwrite: bool,
+) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink() or (target.exists() and target.is_dir()):
+        raise BookBundleError(f"ZIP bundle output must be a regular file: {target}")
+    if _destination_exists(target) and not overwrite:
+        raise BookBundleError(f"bundle output already exists: {target}")
+
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.tmp-", dir=target.parent)
+    os.close(fd)
+    temporary = Path(temporary_name)
     try:
-        if target.suffix.lower() == ".zip":
-            if target.exists() and target.is_dir():
-                raise BookBundleError(f"ZIP bundle output is a directory: {target}")
-            _write_zip(target, manifest, chapters)
+        _write_zip(temporary, manifest, chapters)
+        os.chmod(temporary, 0o644)
+        _read_zip_bundle(temporary)
+        if overwrite:
+            os.replace(temporary, target)
         else:
-            _write_directory(target, manifest, chapters)
+            try:
+                os.link(temporary, target)
+            except FileExistsError as exc:
+                raise BookBundleError(f"bundle output already exists: {target}") from exc
+            temporary.unlink()
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _new_backup_path(target: Path) -> Path:
+    backup = Path(tempfile.mkdtemp(prefix=f".{target.name}.backup-", dir=target.parent))
+    backup.rmdir()
+    return backup
+
+
+def _write_directory_atomic(
+    target: Path,
+    manifest: bytes,
+    chapters: list[tuple[str, bytes]],
+    *,
+    overwrite: bool,
+) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink() or (target.exists() and not target.is_dir()):
+        raise BookBundleError(f"directory bundle output must be a directory: {target}")
+    if _destination_exists(target) and not overwrite:
+        raise BookBundleError(f"bundle output already exists: {target}")
+
+    temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
+    backup: Path | None = None
+    try:
+        _write_directory(temporary, manifest, chapters)
+        _read_directory_bundle(temporary)
+        if _destination_exists(target):
+            if not overwrite:
+                raise BookBundleError(f"bundle output already exists: {target}")
+            if target.is_symlink() or not target.is_dir():
+                raise BookBundleError(f"directory bundle output must be a directory: {target}")
+            backup = _new_backup_path(target)
+            os.replace(target, backup)
+        try:
+            os.replace(temporary, target)
+        except OSError:
+            if backup is not None:
+                os.replace(backup, target)
+                backup = None
+            raise
+        if backup is not None:
+            shutil.rmtree(backup)
+            backup = None
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+
+
+def write_book_bundle(
+    book: Book,
+    output: str | Path,
+    *,
+    format: Literal["directory", "zip"],
+    overwrite: bool = False,
+) -> Path:
+    """Write a complete directory or ZIP bundle atomically beside its destination."""
+    if format not in ("directory", "zip"):
+        raise BookBundleError("bundle format must be 'directory' or 'zip'")
+    manifest, chapters = _manifest_for_book(book)
+    raw_target = Path(os.path.abspath(Path(output).expanduser()))
+    target = raw_target.parent.resolve() / raw_target.name
+    try:
+        if format == "zip":
+            _write_zip_atomic(target, manifest, chapters, overwrite=overwrite)
+        else:
+            _write_directory_atomic(target, manifest, chapters, overwrite=overwrite)
     except BookBundleError:
         raise
     except OSError as exc:

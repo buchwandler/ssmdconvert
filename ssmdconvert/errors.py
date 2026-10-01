@@ -28,7 +28,3 @@ class BookBundleValidationError(BookBundleError):
 
 class MissingDependencyError(SSMDConvertError):
     """An optional adapter/enricher dependency is not installed."""
-
-
-class EnrichmentError(SSMDConvertError):
-    """Optional semantic enrichment failed."""
