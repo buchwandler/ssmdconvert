@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from click import unstyle
 from epub_support import make_epub
 from typer.testing import CliRunner
 
@@ -89,4 +90,4 @@ def test_book_convert_rejects_invalid_selection_and_removed_speech_flags(tmp_pat
 
     result = runner.invoke(app, ["book", "convert", str(source), "--speech", "annotate"])
     assert result.exit_code == 2
-    assert "No such option: --speech" in result.output
+    assert "No such option: --speech" in unstyle(result.output)

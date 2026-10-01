@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from click import unstyle
 from epub_support import make_epub
 from typer.testing import CliRunner
 
@@ -55,7 +56,7 @@ def test_real_command_groups_and_subcommand_help() -> None:
     for args, expected in expected_commands.items():
         result = runner.invoke(app, list(args))
         assert result.exit_code == 0, result.output
-        assert all(item in result.output for item in expected)
+        assert all(item in unstyle(result.output) for item in expected)
 
 
 def test_convert_refuses_collisions_and_force_replaces_atomically(tmp_path: Path) -> None:

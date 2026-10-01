@@ -51,3 +51,6 @@ jobs:
           "$smoke_env/bin/python" -m pip check
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@v1.14.1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          attestations: false
