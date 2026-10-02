@@ -2,6 +2,10 @@
 
 `ssmdconvert` is a deterministic, local ingestion library and CLI that converts common documents and EPUB books into valid SSMD 0.9. It supports combined document conversion and ordered, standalone SSMD chapters in directory or ZIP book bundles.
 
+## SSMD ownership boundary
+
+`ssmdconvert` owns source ingestion, canonical SSMD conversion, chapter identity, and `.ssmdbook` integrity. `ttsready` is a separate downstream workflow that reads canonical SSMD, analyzes and reviews speech semantics, and writes approved changes into SSMD. Applications exchange reviewed content through SSMD documents or book bundles, not through a runtime dependency on `ttsready`. Existing optional `ssmdconvert.speech` APIs remain available for compatibility and are not required by `ttsready`.
+
 ## Install
 
 ```bash
