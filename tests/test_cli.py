@@ -214,7 +214,7 @@ def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
         ],
     )
     assert invalid.exit_code == 2
-    assert "sequence-fallback-mode" in invalid.output
+    assert "sequence-fallback-mode" in unstyle(invalid.output)
 
     book_source = tmp_path / "book.epub"
     make_epub(book_source)
@@ -253,4 +253,4 @@ def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
         ],
     )
     assert invalid_book.exit_code == 2
-    assert "sequence-fallback-mode" in invalid_book.output
+    assert "sequence-fallback-mode" in unstyle(invalid_book.output)
