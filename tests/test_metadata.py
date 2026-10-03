@@ -58,9 +58,7 @@ def test_load_metadata_file_normalizes_nested_json_values(tmp_path: Path) -> Non
         "language": "en-US",
         "title": "Example",
         "authors": ["Ada Author"],
-        "voice_defaults": {
-            "narrator": {"voice": "voice-1", "rate": 1.1, "enabled": True}
-        },
+        "voice_defaults": {"narrator": {"voice": "voice-1", "rate": 1.1, "enabled": True}},
         "requires": ["extension.example"],
     }
     json.dumps(metadata, allow_nan=False)

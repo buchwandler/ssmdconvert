@@ -13,7 +13,14 @@ import typer
 
 from . import __version__
 from .books import convert_book, inspect_book
-from .bundle import load_book_bundle, validate_book_bundle, write_book_bundle
+from .bundle import (
+    _publish_path_no_replace,
+    load_book_bundle,
+    load_book_workspace,
+    refresh_book_workspace,
+    validate_book_bundle,
+    write_book_bundle,
+)
 from .cli_help import AdaptiveTyper, AdaptiveTyperGroup
 from .converter import Converter
 from .errors import SSMDConvertError
@@ -42,12 +49,8 @@ class SequenceFallbackModeOption(str, Enum):
     preserve = "preserve"
 
 
-_SEQUENCE_FALLBACK_OPTIONS = {
-    option.value: option for option in SequenceFallbackModeOption
-}
-DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION = _SEQUENCE_FALLBACK_OPTIONS[
-    DEFAULT_SEQUENCE_FALLBACK_MODE
-]
+_SEQUENCE_FALLBACK_OPTIONS = {option.value: option for option in SequenceFallbackModeOption}
+DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION = _SEQUENCE_FALLBACK_OPTIONS[DEFAULT_SEQUENCE_FALLBACK_MODE]
 
 
 def _version(value: bool) -> None:
@@ -125,10 +128,10 @@ def _write_text_atomically(
             os.replace(temporary, destination)
         else:
             try:
-                os.link(temporary, destination)
+                _publish_path_no_replace(temporary, destination)
             except FileExistsError as exc:
                 raise ValueError(f"output destination already exists: {destination}") from exc
-            temporary.unlink()
+            temporary.unlink(missing_ok=True)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -284,8 +287,10 @@ def _metadata_entry_lines(key: str, label: str, metadata: Mapping[str, Any]) -> 
     if key not in metadata:
         return [f"{label}: not set"]
     value = metadata[key]
-    if key == "authors" and isinstance(value, list) and all(
-        isinstance(author, str) for author in value
+    if (
+        key == "authors"
+        and isinstance(value, list)
+        and all(isinstance(author, str) for author in value)
     ):
         rendered = ", ".join(value) if value else "[]"
     elif isinstance(value, str):
@@ -315,7 +320,18 @@ def book_metadata(
     """Display metadata stored in a directory or ZIP SSMD book bundle."""
 
     def run() -> None:
-        book = load_book_bundle(bundle)
+        if bundle.is_dir():
+            workspace = load_book_workspace(bundle)
+            book = workspace.book
+            dirty_count = sum(chapter.dirty for chapter in workspace.chapters)
+            workspace_lines = [
+                "Workspace: directory",
+                f"Status: {'dirty' if workspace.dirty else 'clean'}",
+                f"Dirty chapters: {dirty_count}",
+            ]
+        else:
+            book = load_book_bundle(bundle)
+            workspace_lines = ["Workspace: no", "Status: valid"]
         if json_output:
             typer.echo(
                 json.dumps(
@@ -327,7 +343,36 @@ def book_metadata(
                 )
             )
             return
-        typer.echo(_render_stored_metadata(book.metadata))
+        typer.echo("\n".join(workspace_lines) + "\n\n" + _render_stored_metadata(book.metadata))
+
+    _run_with_domain_errors(run)
+
+
+@book_app.command("refresh")  # type: ignore[untyped-decorator]
+def book_refresh(
+    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    check: Annotated[bool, typer.Option("--check")] = False,
+) -> None:
+    """Refresh an editable workspace manifest, or check whether it is clean."""
+
+    def run() -> None:
+        if check:
+            current = load_book_workspace(workspace)
+            if current.dirty:
+                dirty_count = sum(chapter.dirty for chapter in current.chapters)
+                typer.echo(f"Workspace dirty: {workspace}", err=True)
+                typer.echo(f"Dirty chapters: {dirty_count}", err=True)
+                raise typer.Exit(code=1)
+            typer.echo(f"Workspace clean: {workspace}")
+            return
+
+        current = load_book_workspace(workspace)
+        changed_digests = sum(chapter.dirty for chapter in current.chapters)
+        refreshed = refresh_book_workspace(workspace)
+        typer.echo(f"Refreshed {workspace}")
+        typer.echo(f"Chapters: {len(refreshed.chapters)}")
+        typer.echo(f"Changed digests: {changed_digests}")
+        typer.echo("Status: clean")
 
     _run_with_domain_errors(run)
 
@@ -374,6 +419,30 @@ def book_convert(
         )
         typer.echo(f"Created SSMD book bundle: {written}")
         typer.echo(f"Chapters: {len(book.chapters)}")
+
+    _run_with_domain_errors(run)
+
+
+@book_app.command("pack")  # type: ignore[untyped-decorator]
+def book_pack(
+    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    output: Annotated[Path, typer.Option("--output", "-o")],
+    force: Annotated[bool, typer.Option("--force", help="Replace an existing ZIP bundle.")] = False,
+) -> None:
+    """Pack current valid workspace chapters into a strict portable ZIP."""
+
+    def run() -> None:
+        current = load_book_workspace(workspace)
+        destination = _output_path(output)
+        _reject_input_overwrite(workspace, destination)
+        written = write_book_bundle(
+            current.book,
+            destination,
+            format="zip",
+            overwrite=force,
+        )
+        typer.echo(f"Packed SSMD book ZIP: {written}")
+        typer.echo(f"Chapters: {len(current.book.chapters)}")
 
     _run_with_domain_errors(run)
 

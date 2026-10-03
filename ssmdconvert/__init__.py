@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from .books import convert_book, inspect_book
-from .bundle import load_book_bundle, validate_book_bundle, write_book_bundle
+from .bundle import (
+    load_book_bundle,
+    load_book_workspace,
+    refresh_book_workspace,
+    validate_book_bundle,
+    write_book_bundle,
+)
 from .converter import Converter, convert, convert_content
 from .errors import (
     BookBundleError,
@@ -20,10 +26,12 @@ from .models import (
     BookChapter,
     BookInspection,
     BookInspectionChapter,
+    BookWorkspace,
     ConversionResult,
     Document,
     Section,
     SourceInfo,
+    WorkspaceChapterStatus,
 )
 
 try:
@@ -41,6 +49,7 @@ __all__ = [
     "BookBundleError",
     "BookBundleValidationError",
     "BookChapter",
+    "BookWorkspace",
     "BookError",
     "BookInspection",
     "BookInspectionChapter",
@@ -60,6 +69,9 @@ __all__ = [
     "convert_content",
     "inspect_book",
     "load_book_bundle",
+    "load_book_workspace",
+    "refresh_book_workspace",
     "validate_book_bundle",
+    "WorkspaceChapterStatus",
     "write_book_bundle",
 ]

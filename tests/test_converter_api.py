@@ -64,10 +64,8 @@ def test_convert_overrides_source_sequence_fallback_metadata(
 
     assert result.document.metadata["sequence_fallback_mode"] == "preserve"
     assert (
-        parse_structure(result.ssmd, dialect="0.9").header["sequence_fallback_mode"]
-        == "preserve"
+        parse_structure(result.ssmd, dialect="0.9").header["sequence_fallback_mode"] == "preserve"
     )
-
 
 
 def test_convert_content_applies_metadata_overrides() -> None:

@@ -5,17 +5,21 @@ from ssmdconvert import (
     BookChapter,
     BookInspection,
     BookInspectionChapter,
+    BookWorkspace,
     ConversionResult,
     Converter,
     MissingDependencyError,
     SourceInfo,
     SSMDConvertError,
     UnsupportedInputError,
+    WorkspaceChapterStatus,
     convert,
     convert_book,
     convert_content,
     inspect_book,
     load_book_bundle,
+    load_book_workspace,
+    refresh_book_workspace,
     validate_book_bundle,
     write_book_bundle,
 )
@@ -42,6 +46,9 @@ source_hash: str = book.source_sha256
 source_chapter_count: int | None = book.source_chapter_count
 bundle: Path = write_book_bundle(book, Path("book.ssmdbook"), format="directory")
 loaded: Book = load_book_bundle(bundle)
+workspace: BookWorkspace = load_book_workspace(Path("book.ssmdbook"))
+workspace_status: WorkspaceChapterStatus = workspace.chapters[0]
+refreshed_workspace: BookWorkspace = refresh_book_workspace(Path("book.ssmdbook"))
 validate_book_bundle(bundle)
 
 try:

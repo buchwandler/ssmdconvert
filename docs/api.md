@@ -24,8 +24,6 @@ The core names documented here are exported from `ssmdconvert` and listed in `ss
 result = convert("manuscript.md", sequence_fallback_mode="preserve")
 ```
 
-
-
 `metadata_overrides` accepts a mapping of supported portable SSMD and bibliographic values in the Python conversion APIs. The CLI counterpart is `--metadata-file PATH`, a UTF-8 YAML mapping. Values merge in source, file, then explicit CLI order; the effective `sequence_fallback_mode` is applied last. For example:
 
 ```python
@@ -34,6 +32,7 @@ result = convert(
     metadata_overrides={"voice_defaults": {"narrator": {"rate": "slow"}}},
 )
 ```
+
 ## Source-neutral models
 
 ```{autoclass} ssmdconvert.SourceInfo

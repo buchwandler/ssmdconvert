@@ -57,9 +57,7 @@ def _plain_json_value(value: Any, path: str) -> Any:
                 raise ValueError(f"metadata mapping keys at {path} must be strings")
             plain[key] = _plain_json_value(item, f"{path}.{key}")
         return plain
-    raise ValueError(
-        f"metadata value {path} is not JSON-compatible ({type(value).__name__})"
-    )
+    raise ValueError(f"metadata value {path} is not JSON-compatible ({type(value).__name__})")
 
 
 def _validated_metadata_mapping(value: Mapping[Any, Any]) -> dict[str, Any]:
@@ -107,7 +105,5 @@ def merge_document_metadata(
         metadata.update(cli_overrides)
     if language is not None:
         metadata["language"] = language
-    metadata["sequence_fallback_mode"] = validate_sequence_fallback_mode(
-        sequence_fallback_mode
-    )
+    metadata["sequence_fallback_mode"] = validate_sequence_fallback_mode(sequence_fallback_mode)
     return metadata

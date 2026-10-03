@@ -31,7 +31,6 @@ ssmdconvert convert manuscript.txt \
   -l en
 ```
 
-
 Pass a UTF-8 YAML mapping with `--metadata-file PATH` to either `convert` or `book convert` for nested portable metadata and bibliographic overrides. Values are JSON-compatible; only supported metadata keys are accepted. Metadata precedence is source, file, then explicit CLI values. The effective sequence fallback option is applied last.
 
 ```yaml
@@ -74,9 +73,8 @@ Selectors use original 1-based source chapter numbers. They accept a single numb
 
 Book output format is inferred only from `.ssmdbook` (directory) and `.ssmdbook.zip` (ZIP). For other names, specify `--format directory` or `--format zip`. Existing bundles are refused unless `--force` is supplied. A forced directory output replaces the complete previous directory; stale files are not merged into the new bundle.
 
-
-
 Use `ssmdconvert book metadata BUNDLE` to display validated metadata stored in either a directory or ZIP bundle. Add `--json` for a deterministic `{"metadata": ...}` object. The human form labels absent known values as `not set` and renders nested values indented.
+
 ## Help
 
 ```bash

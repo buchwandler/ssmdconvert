@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -14,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal, NoReturn, TypeGuard
 
 from .errors import BookBundleError, BookBundleValidationError
-from .models import Book, BookChapter, SourceInfo
+from .models import Book, BookChapter, BookWorkspace, SourceInfo, WorkspaceChapterStatus
 from .render import validate_ssmd_document
 
 _FORMAT = "ssmdconvert.book"
@@ -401,14 +402,29 @@ def _book_from_manifest(
     manifest: dict[str, Any],
     read_bytes: Callable[[str], bytes],
     display: str,
+    *,
+    verify_sha256: bool = True,
+    workspace_chapters: list[WorkspaceChapterStatus] | None = None,
 ) -> Book:
     source = manifest["source"]
     chapters: list[BookChapter] = []
     for entry in manifest["chapters"]:
         path = entry["path"]
         raw = read_bytes(path)
-        if _sha256(raw) != entry["sha256"]:
+        actual_sha256 = _sha256(raw)
+        dirty = actual_sha256 != entry["sha256"]
+        if verify_sha256 and dirty:
             _invalid(display, f"SHA256 mismatch for chapter {path!r}")
+        if workspace_chapters is not None:
+            workspace_chapters.append(
+                WorkspaceChapterStatus(
+                    id=entry["id"],
+                    path=path,
+                    expected_sha256=entry["sha256"],
+                    actual_sha256=actual_sha256,
+                    dirty=dirty,
+                )
+            )
         try:
             ssmd = raw.decode("utf-8")
         except UnicodeDecodeError as exc:
@@ -482,6 +498,39 @@ def _destination_exists(target: Path) -> bool:
     return target.exists() or target.is_symlink()
 
 
+def _publish_path_no_replace(source: Path, target: Path) -> None:
+    """Publish a completed file without overwriting an existing destination."""
+    link = getattr(os, "link", None)
+    if link is not None:
+        try:
+            link(source, target)
+            return
+        except OSError as exc:
+            unsupported = {
+                errno.EPERM,
+                errno.EXDEV,
+                getattr(errno, "EOPNOTSUPP", -1),
+                getattr(errno, "ENOTSUP", -1),
+                getattr(errno, "ENOSYS", -1),
+            }
+            if exc.errno not in unsupported:
+                raise
+
+    fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    reservation = os.fstat(fd)
+    os.close(fd)
+    try:
+        os.replace(source, target)
+    except OSError:
+        try:
+            current = target.stat()
+            if (current.st_dev, current.st_ino) == (reservation.st_dev, reservation.st_ino):
+                target.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def _write_zip_atomic(
     target: Path,
     manifest: bytes,
@@ -506,10 +555,10 @@ def _write_zip_atomic(
             os.replace(temporary, target)
         else:
             try:
-                os.link(temporary, target)
+                _publish_path_no_replace(temporary, target)
             except FileExistsError as exc:
                 raise BookBundleError(f"bundle output already exists: {target}") from exc
-            temporary.unlink()
+            temporary.unlink(missing_ok=True)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -600,3 +649,113 @@ def load_book_bundle(source: str | Path) -> Book:
 def validate_book_bundle(source: str | Path) -> None:
     """Validate a book bundle using the same strict loader as deserialization."""
     load_book_bundle(source)
+
+
+def load_book_workspace(path: str | Path) -> BookWorkspace:
+    """Load current chapter content from an editable directory book workspace.
+
+    Unlike :func:`load_book_bundle`, stale chapter digests are reported as
+    workspace state instead of making the directory unreadable. No files are
+    modified by this operation.
+    """
+    source = Path(path).expanduser()
+    display = str(source)
+    if not source.is_dir():
+        _invalid(display, "book workspace must be a directory")
+    try:
+        root = source.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        _invalid(display, f"could not resolve workspace directory: {exc}")
+
+    manifest_bytes = _read_directory_file(
+        root,
+        "manifest.json",
+        display,
+        max_bytes=_MAX_MANIFEST_BYTES,
+    )
+    manifest = _parse_manifest(manifest_bytes, display)
+    total_chapter_bytes = 0
+
+    def read_chapter(name: str) -> bytes:
+        nonlocal total_chapter_bytes
+        data = _read_directory_file(
+            root,
+            name,
+            display,
+            max_bytes=_MAX_CHAPTER_BYTES,
+        )
+        total_chapter_bytes += len(data)
+        if total_chapter_bytes > _MAX_TOTAL_CHAPTER_BYTES:
+            _invalid(display, "referenced chapter files exceed the total size limit")
+        return data
+
+    statuses: list[WorkspaceChapterStatus] = []
+    book = _book_from_manifest(
+        manifest,
+        read_chapter,
+        display,
+        verify_sha256=False,
+        workspace_chapters=statuses,
+    )
+    chapters = tuple(statuses)
+    return BookWorkspace(
+        path=root,
+        book=book,
+        chapters=chapters,
+        dirty=any(chapter.dirty for chapter in chapters),
+    )
+
+
+def refresh_book_workspace(path: str | Path) -> BookWorkspace:
+    """Refresh chapter digests and character counts in a workspace manifest."""
+    workspace = load_book_workspace(path)
+    manifest_path = workspace.path / "manifest.json"
+    try:
+        manifest = _parse_manifest(
+            _read_directory_file(
+                workspace.path,
+                "manifest.json",
+                str(workspace.path),
+                max_bytes=_MAX_MANIFEST_BYTES,
+            ),
+            str(workspace.path),
+        )
+        chapters_by_id = {chapter.id: chapter for chapter in workspace.book.chapters}
+        status_by_id = {chapter.id: chapter for chapter in workspace.chapters}
+        for entry in manifest["chapters"]:
+            chapter = chapters_by_id[entry["id"]]
+            status = status_by_id[entry["id"]]
+            entry["sha256"] = status.actual_sha256
+            entry["char_count"] = len(chapter.ssmd)
+        _validate_manifest(manifest, str(workspace.path))
+        manifest_bytes = json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        file_mode = stat.S_IMODE(manifest_path.stat().st_mode)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=".manifest.json.tmp-",
+            dir=workspace.path,
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(manifest_bytes)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, file_mode)
+            os.replace(temporary, manifest_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    except BookBundleError:
+        raise
+    except (OSError, TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise BookBundleError(
+            f"could not refresh workspace manifest {manifest_path}: {exc}"
+        ) from exc
+
+    validate_book_bundle(workspace.path)
+    return load_book_workspace(workspace.path)

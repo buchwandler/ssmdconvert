@@ -16,8 +16,12 @@ from ssmd import parse_structure
 from ssmdconvert import (
     BookBundleError,
     BookBundleValidationError,
+    BookWorkspace,
+    WorkspaceChapterStatus,
     convert_book,
     load_book_bundle,
+    load_book_workspace,
+    refresh_book_workspace,
     validate_book_bundle,
     write_book_bundle,
 )
@@ -472,3 +476,92 @@ def test_legacy_bundle_without_policy_and_with_unknown_metadata_remains_valid(
     assert loaded.metadata["third_party_metadata"] == {"vendor": "sample", "enabled": True}
     for chapter in loaded.chapters:
         assert "sequence_fallback_mode" not in parse_structure(chapter.ssmd, dialect="0.9").header
+
+
+def test_workspace_loader_reports_clean_and_dirty_current_content(tmp_path: Path) -> None:
+    directory, manifest = _write_directory(tmp_path)
+    load_workspace = load_book_workspace
+
+    before_manifest = (directory / "manifest.json").read_bytes()
+    clean = load_workspace(directory)
+    assert isinstance(clean, BookWorkspace)
+    assert isinstance(clean.chapters[0], WorkspaceChapterStatus)
+    assert clean.path == directory.resolve()
+    assert clean.dirty is False
+    assert all(not chapter.dirty for chapter in clean.chapters)
+    assert clean.chapters[0].expected_sha256 == clean.chapters[0].actual_sha256
+
+    entry = manifest["chapters"][0]
+    chapter_path = directory / entry["path"]
+    edited_text = chapter_path.read_text(encoding="utf-8") + "\n\nEdited workspace text.\n"
+    chapter_path.write_text(edited_text, encoding="utf-8")
+
+    with pytest.raises(BookBundleValidationError, match="SHA256 mismatch"):
+        load_book_bundle(directory)
+
+    dirty = load_workspace(directory)
+    assert dirty.dirty is True
+    assert dirty.chapters[0].dirty is True
+    assert dirty.chapters[0].expected_sha256 == entry["sha256"]
+    assert (
+        dirty.chapters[0].actual_sha256 == hashlib.sha256(edited_text.encode("utf-8")).hexdigest()
+    )
+    assert dirty.book.chapters[0].ssmd == edited_text
+    assert (directory / "manifest.json").read_bytes() == before_manifest
+
+
+def test_workspace_loader_rejects_invalid_ssmd_even_with_stale_digest(tmp_path: Path) -> None:
+    directory, manifest = _write_directory(tmp_path)
+    entry = manifest["chapters"][0]
+    (directory / entry["path"]).write_bytes(b"not valid SSMD")
+
+    load_workspace = load_book_workspace
+    with pytest.raises(BookBundleValidationError, match="not valid SSMD"):
+        load_workspace(directory)
+
+
+def test_workspace_loader_rejects_missing_chapter_and_path_traversal(tmp_path: Path) -> None:
+    missing, manifest = _write_directory(tmp_path / "missing")
+    (missing / manifest["chapters"][0]["path"]).unlink()
+    load_workspace = load_book_workspace
+    with pytest.raises(BookBundleValidationError, match="missing or unresolvable"):
+        load_workspace(missing)
+
+    traversal, manifest = _write_directory(tmp_path / "traversal")
+    manifest["chapters"][0]["path"] = "chapters/../outside.ssmd.md"
+    _write_manifest(traversal, manifest)
+    with pytest.raises(BookBundleValidationError, match="relative and normalized"):
+        load_workspace(traversal)
+
+
+def test_refresh_workspace_updates_digest_char_count_and_restores_strict_validity(
+    tmp_path: Path,
+) -> None:
+    directory, manifest = _write_directory(tmp_path)
+    entry = manifest["chapters"][0]
+    chapter_path = directory / entry["path"]
+    edited_text = chapter_path.read_text(encoding="utf-8") + "\n\nRefreshed text.\n"
+    chapter_path.write_text(edited_text, encoding="utf-8")
+
+    refreshed = refresh_book_workspace(directory)
+
+    updated = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    updated_entry = updated["chapters"][0]
+    assert updated_entry["sha256"] == hashlib.sha256(edited_text.encode("utf-8")).hexdigest()
+    assert updated_entry["char_count"] == len(edited_text)
+    assert refreshed.dirty is False
+    assert all(not chapter.dirty for chapter in refreshed.chapters)
+    assert load_book_bundle(directory).chapters[0].ssmd == edited_text
+
+
+def test_readio_state_is_ignored_by_workspace_and_strict_directory_validation(
+    tmp_path: Path,
+) -> None:
+    directory, _manifest = _write_directory(tmp_path)
+    local_state = directory / ".readio" / "cache"
+    local_state.mkdir(parents=True)
+    (local_state / "state.json").write_text("not a bundle member", encoding="utf-8")
+
+    load_workspace = load_book_workspace
+    assert load_workspace(directory).dirty is False
+    validate_book_bundle(directory)

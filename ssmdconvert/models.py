@@ -75,6 +75,27 @@ class Book:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceChapterStatus:
+    """Recorded and current digest state for one editable workspace chapter."""
+
+    id: str
+    path: str
+    expected_sha256: str
+    actual_sha256: str
+    dirty: bool
+
+
+@dataclass(frozen=True, slots=True)
+class BookWorkspace:
+    """An editable directory bundle and its current source dirtiness state."""
+
+    path: Path
+    book: Book
+    chapters: tuple[WorkspaceChapterStatus, ...]
+    dirty: bool
+
+
+@dataclass(frozen=True, slots=True)
 class BookInspectionChapter:
     """Inventory metadata for one source chapter."""
 

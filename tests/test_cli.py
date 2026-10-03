@@ -337,9 +337,7 @@ def test_cli_help_uses_stacked_layout_on_narrow_terminals(terminal_width: int) -
         assert lines[option_index + 1].lstrip().startswith("[default:")
         assert len(lines[option_index + 1]) - len(lines[option_index + 1].lstrip()) >= 6
         metadata_index = next(
-            index
-            for index, line in enumerate(lines)
-            if line.strip().startswith("--metadata-file ")
+            index for index, line in enumerate(lines) if line.strip().startswith("--metadata-file ")
         )
         assert "YAML file with" not in lines[metadata_index]
         assert lines[metadata_index + 1].lstrip().startswith("YAML file with")
@@ -353,7 +351,6 @@ def test_cli_help_keeps_compact_layout_on_wide_terminals() -> None:
         line.startswith("  convert  Convert a supported input")
         for line in result.output.splitlines()
     )
-
 
 
 def test_convert_metadata_file_merges_with_cli_precedence(tmp_path: Path) -> None:
@@ -391,7 +388,6 @@ def test_convert_metadata_file_merges_with_cli_precedence(tmp_path: Path) -> Non
     assert header["language"] == "de-DE"
     assert header["sequence_fallback_mode"] == "preserve"
     assert header["voice_defaults"] == {}
-
 
 
 def test_convert_rejects_invalid_ssmd_metadata_shape_from_file(tmp_path: Path) -> None:

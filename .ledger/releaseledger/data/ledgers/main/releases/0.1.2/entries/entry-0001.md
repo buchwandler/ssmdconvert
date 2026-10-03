@@ -7,18 +7,19 @@ versioning:
 entry_id: entry-0001
 release_version: 0.1.2
 kind: added
-summary: Added adaptive CLI help, portable metadata overrides, book language selection,
+summary:
+  Added adaptive CLI help, portable metadata overrides, book language selection,
   and bundle metadata inspection
 status: accepted
 audience: null
 scopes: []
 source_refs:
-- tl:task-0006
+  - tl:task-0006
 paths:
-- ssmdconvert/cli.py
-- ssmdconvert/metadata.py
-- ssmdconvert/books.py
-- ssmdconvert/render.py
+  - ssmdconvert/cli.py
+  - ssmdconvert/metadata.py
+  - ssmdconvert/books.py
+  - ssmdconvert/render.py
 issues: []
 prs: []
 sources: []

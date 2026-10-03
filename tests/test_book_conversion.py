@@ -86,7 +86,6 @@ def test_convert_book_persists_explicit_preserve_sequence_fallback_mode(
         assert header["sequence_fallback_mode"] == "preserve"
 
 
-
 def test_convert_book_language_override_and_absent_source_language(tmp_path: Path) -> None:
     source = tmp_path / "book.epub"
     make_epub(source)
