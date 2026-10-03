@@ -45,9 +45,7 @@ class MarkdownAdapter:
         for index, (title, body) in enumerate(split_markdown(content), start=1):
             speech = markdown_to_speech(body)
             if speech:
-                sections.append(
-                    Section(id=f"section-{index:04d}", title=title, markdown=speech)
-                )
+                sections.append(Section(id=f"section-{index:04d}", title=title, markdown=speech))
         return Document(
             source=SourceInfo(
                 format="markdown",

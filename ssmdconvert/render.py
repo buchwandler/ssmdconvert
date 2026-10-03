@@ -46,6 +46,8 @@ def render_standalone_chapter(
     if authors:
         header["author"] = authors[0]
     body = markdown.rstrip() + "\n" if markdown else ""
+    if metadata.get("sequence_fallback_mode") is not None:
+        header["sequence_fallback_mode"] = metadata["sequence_fallback_mode"]
     result = serialize_front_matter(header, body)
     validate_ssmd_document(result)
     return result

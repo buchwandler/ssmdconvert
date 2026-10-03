@@ -8,6 +8,12 @@ from dataclasses import asdict, dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal
 
+from ..policy import (
+    DEFAULT_SEQUENCE_FALLBACK_MODE,
+    SequenceFallbackMode,
+    validate_sequence_fallback_mode,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class SpeechPreparationOptions:
@@ -16,14 +22,13 @@ class SpeechPreparationOptions:
     mode: Literal["off", "audit", "annotate"] = "off"
     language: str | None = None
     strict: bool = False
-    sequence_fallback_mode: Literal["preserve", "spell"] = "spell"
+    sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE
     pronunciations: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.mode not in {"off", "audit", "annotate"}:
             raise ValueError("mode must be 'off', 'audit', or 'annotate'")
-        if self.sequence_fallback_mode not in {"preserve", "spell"}:
-            raise ValueError("sequence_fallback_mode must be 'preserve' or 'spell'")
+        validate_sequence_fallback_mode(self.sequence_fallback_mode)
         if self.language is not None and (
             not isinstance(self.language, str) or not self.language.strip()
         ):

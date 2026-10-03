@@ -11,13 +11,12 @@ def test_markdown_becomes_safe_speech_sections(tmp_path: Path) -> None:
     assert "Hello world." in result.ssmd
 
 
-
 def test_markdown_semantics_are_safe_for_ssmd_controls() -> None:
     source = (
         "# Intro\n\nThis is *important*, **critical**, and ~~old~~.\n\n"
         "Read the [guide](https://example.invalid). ![diagram](image.png) and `code`.\n\n"
         "- [x] done\n- [ ] later\n\n"
-        "```text\n[x]{rate=\"fast\"}\n...500ms\n@chapter\n```\n\n"
+        '```text\n[x]{rate="fast"}\n...500ms\n@chapter\n```\n\n'
         "A claim.[^1]\n\n[^1]: Supporting detail."
     )
     result = convert_content(source, input_format="markdown", source_name="notes.md")
@@ -44,7 +43,6 @@ def test_html_converts_headings_paragraphs_and_emphasis(tmp_path: Path) -> None:
     assert "Hello *there*." in result.ssmd
 
 
-
 def test_in_memory_conversions_match_path_adapters(tmp_path: Path) -> None:
     inputs = (
         ("notes.txt", "text", "Chapter One\n\nPlain text."),
@@ -61,9 +59,7 @@ def test_in_memory_conversions_match_path_adapters(tmp_path: Path) -> None:
         source = tmp_path / source_name
         source.write_text(content, encoding="utf-8")
         from_path = converter.convert(source)
-        from_content = convert_content(
-            content, input_format=input_format, source_name=source_name
-        )
+        from_content = convert_content(content, input_format=input_format, source_name=source_name)
 
         assert from_content.ssmd == from_path.ssmd
         assert from_content.document.sections == from_path.document.sections

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from epub_support import make_epub
-from ssmd import lint
+from ssmd import lint, parse_structure
 
 from ssmdconvert import Book, BookChapter, convert_book
 
@@ -56,3 +56,29 @@ def test_convert_book_selection_preserves_source_numbers(tmp_path: Path) -> None
     assert book.chapters[0].source_number == 2
     assert book.chapters[0].id == "chapter-0002"
     assert book.chapters[0].title == "Two"
+
+
+def test_convert_book_persists_default_sequence_fallback_mode(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    make_epub(source)
+
+    book = convert_book(source)
+
+    assert book.metadata["sequence_fallback_mode"] == "spell"
+    for chapter in book.chapters:
+        header = parse_structure(chapter.ssmd, dialect="0.9").header
+        assert header["sequence_fallback_mode"] == "spell"
+
+
+def test_convert_book_persists_explicit_preserve_sequence_fallback_mode(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.epub"
+    make_epub(source)
+
+    book = convert_book(source, sequence_fallback_mode="preserve")
+
+    assert book.metadata["sequence_fallback_mode"] == "preserve"
+    for chapter in book.chapters:
+        header = parse_structure(chapter.ssmd, dialect="0.9").header
+        assert header["sequence_fallback_mode"] == "preserve"

@@ -6,6 +6,7 @@ from typing import Any
 
 from click import unstyle
 from epub_support import make_epub
+from ssmd import parse_structure
 from typer.testing import CliRunner
 
 from ssmdconvert import cli as cli_module
@@ -47,10 +48,15 @@ def test_enrichment_is_not_a_cli_command() -> None:
 def test_real_command_groups_and_subcommand_help() -> None:
     expected_commands = {
         ("--help",): ("convert", "inspect", "book"),
-        ("convert", "--help"): ("--force", "--output"),
+        ("convert", "--help"): ("--force", "--output", "--sequence-fallback-mode"),
         ("book", "--help"): ("inspect", "convert", "validate"),
         ("book", "inspect", "--help"): ("--json",),
-        ("book", "convert", "--help"): ("--chapters", "--format", "--force"),
+        ("book", "convert", "--help"): (
+            "--chapters",
+            "--format",
+            "--force",
+            "--sequence-fallback-mode",
+        ),
         ("book", "validate", "--help"): ("--json",),
     }
     for args, expected in expected_commands.items():
@@ -160,3 +166,91 @@ def test_book_convert_rejects_ambiguous_output_and_same_input(tmp_path: Path) ->
     )
     assert same_path.exit_code == 1
     assert "must not be the input file" in same_path.output
+
+
+def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.txt"
+    source.write_text("Hello.", encoding="utf-8")
+
+    default_output = tmp_path / "default.ssmd"
+    default = runner.invoke(app, ["convert", str(source), "--output", str(default_output)])
+    assert default.exit_code == 0, default.output
+    assert (
+        parse_structure(default_output.read_text(encoding="utf-8"), dialect="0.9").header[
+            "sequence_fallback_mode"
+        ]
+        == "spell"
+    )
+
+    preserve_output = tmp_path / "preserve.ssmd"
+    preserve = runner.invoke(
+        app,
+        [
+            "convert",
+            str(source),
+            "--output",
+            str(preserve_output),
+            "--sequence-fallback-mode",
+            "preserve",
+        ],
+    )
+    assert preserve.exit_code == 0, preserve.output
+    assert (
+        parse_structure(preserve_output.read_text(encoding="utf-8"), dialect="0.9").header[
+            "sequence_fallback_mode"
+        ]
+        == "preserve"
+    )
+
+    invalid = runner.invoke(
+        app,
+        [
+            "convert",
+            str(source),
+            "--sequence-fallback-mode",
+            "invalid",
+        ],
+    )
+    assert invalid.exit_code == 2
+    assert "sequence-fallback-mode" in invalid.output
+
+    book_source = tmp_path / "book.epub"
+    make_epub(book_source)
+    book_default_path = tmp_path / "default.ssmdbook"
+    book_default = runner.invoke(
+        app,
+        ["book", "convert", str(book_source), "--output", str(book_default_path)],
+    )
+    assert book_default.exit_code == 0, book_default.output
+    assert load_book_bundle(book_default_path).metadata["sequence_fallback_mode"] == "spell"
+
+    book_preserve_path = tmp_path / "preserve.ssmdbook"
+    book_preserve = runner.invoke(
+        app,
+        [
+            "book",
+            "convert",
+            str(book_source),
+            "--output",
+            str(book_preserve_path),
+            "--sequence-fallback-mode",
+            "preserve",
+        ],
+    )
+    assert book_preserve.exit_code == 0, book_preserve.output
+    assert load_book_bundle(book_preserve_path).metadata["sequence_fallback_mode"] == "preserve"
+
+    invalid_book = runner.invoke(
+        app,
+        [
+            "book",
+            "convert",
+            str(book_source),
+            "--sequence-fallback-mode",
+            "invalid",
+        ],
+    )
+    assert invalid_book.exit_code == 2
+    assert "sequence-fallback-mode" in invalid_book.output

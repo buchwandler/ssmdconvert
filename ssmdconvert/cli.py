@@ -5,6 +5,7 @@ import os
 import tempfile
 from collections.abc import Callable
 from dataclasses import asdict
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -19,6 +20,11 @@ from .errors import SSMDConvertError
 app = typer.Typer(help="Convert documents and books into SSMD.", no_args_is_help=True)
 book_app = typer.Typer(help="Inspect and convert EPUB books.", no_args_is_help=True)
 app.add_typer(book_app, name="book")
+
+
+class SequenceFallbackModeOption(str, Enum):
+    spell = "spell"
+    preserve = "preserve"
 
 
 def _version(value: bool) -> None:
@@ -133,6 +139,10 @@ def convert(
     title: Annotated[str | None, typer.Option("--title")] = None,
     author: Annotated[str | None, typer.Option("--author")] = None,
     language: Annotated[str | None, typer.Option("--language")] = None,
+    sequence_fallback_mode: Annotated[
+        SequenceFallbackModeOption,
+        typer.Option("--sequence-fallback-mode"),
+    ] = SequenceFallbackModeOption.spell,
     force: Annotated[
         bool, typer.Option("--force", help="Replace an existing output file.")
     ] = False,
@@ -140,7 +150,13 @@ def convert(
     """Convert a supported input into one SSMD document."""
 
     def run() -> None:
-        result = Converter().convert(source, title=title, author=author, language=language)
+        result = Converter().convert(
+            source,
+            title=title,
+            author=author,
+            language=language,
+            sequence_fallback_mode=sequence_fallback_mode.value,
+        )
         destination = output or source.with_suffix(".ssmd")
         _write_text_atomically(result.ssmd, destination, source=source, force=force)
         typer.echo(f"Converted {source} -> {_output_path(destination)}")
@@ -223,13 +239,21 @@ def book_convert(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     chapters: Annotated[str, typer.Option("--chapters")] = "all",
+    sequence_fallback_mode: Annotated[
+        SequenceFallbackModeOption,
+        typer.Option("--sequence-fallback-mode"),
+    ] = SequenceFallbackModeOption.spell,
     bundle_format: Annotated[str | None, typer.Option("--format")] = None,
     force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
 ) -> None:
     """Convert an EPUB into an SSMD book bundle."""
 
     def run() -> None:
-        book = convert_book(source, chapters=chapters)
+        book = convert_book(
+            source,
+            chapters=chapters,
+            sequence_fallback_mode=sequence_fallback_mode.value,
+        )
         destination = output or source.with_suffix(".ssmdbook")
         _reject_input_overwrite(source, _output_path(destination))
         selected_format = _book_output_format(destination, bundle_format)

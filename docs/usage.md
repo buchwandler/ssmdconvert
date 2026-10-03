@@ -3,7 +3,7 @@
 ## Convert a document
 
 ```bash
-ssmdconvert convert INPUT [-o OUTPUT] [--title TITLE] [--author AUTHOR] [--language LANGUAGE]
+ssmdconvert convert INPUT [-o OUTPUT] [--title TITLE] [--author AUTHOR] [--language LANGUAGE] [--sequence-fallback-mode spell|preserve]
 ```
 
 Examples:
@@ -31,6 +31,13 @@ ssmdconvert convert manuscript.txt \
   --language en
 ```
 
+The sequence fallback policy controls residual sequence handling for downstream speech preparation. Both conversion commands accept `spell` or `preserve`; the default is `spell`. The chosen value is persisted in SSMD front matter and, for books, in manifest metadata and every chapter.
+
+```bash
+ssmdconvert convert manuscript.md --sequence-fallback-mode preserve -o manuscript.ssmd
+ssmdconvert book convert novel.epub --sequence-fallback-mode preserve -o novel.ssmdbook
+```
+
 ## Inspect a source
 
 Inspect the selected local adapter and normalized document without writing output:
@@ -48,7 +55,7 @@ The book CLI uses explicit subcommands:
 
 ```bash
 ssmdconvert book inspect novel.epub [--json]
-ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT]
+ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [--sequence-fallback-mode spell|preserve]
 ssmdconvert book validate BUNDLE [--json]
 ```
 

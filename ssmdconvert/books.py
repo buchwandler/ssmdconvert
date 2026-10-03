@@ -7,6 +7,11 @@ from ._epub import ExtractedChapter, load_epub
 from .chapter_selection import parse_chapter_selection
 from .errors import BookError
 from .models import Book, BookChapter, BookInspection, BookInspectionChapter, SourceInfo
+from .policy import (
+    DEFAULT_SEQUENCE_FALLBACK_MODE,
+    SequenceFallbackMode,
+    validate_sequence_fallback_mode,
+)
 from .render import render_standalone_chapter
 
 
@@ -65,9 +70,13 @@ def convert_book(
     source: str | Path,
     *,
     chapters: str | None = "all",
+    sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
 ) -> Book:
     """Convert selected EPUB chapters to standalone SSMD in source order."""
+    mode = validate_sequence_fallback_mode(sequence_fallback_mode)
     inspection, extracted_chapters = _inspect_epub(source)
+    metadata = dict(inspection.metadata)
+    metadata["sequence_fallback_mode"] = mode
     source_path = inspection.source.path
     assert source_path is not None
     source_sha256 = _source_sha256(source_path)
@@ -82,7 +91,7 @@ def convert_book(
         if chapter.source_number not in selected:
             continue
         try:
-            ssmd = render_standalone_chapter(chapter.title, chapter.markdown, inspection.metadata)
+            ssmd = render_standalone_chapter(chapter.title, chapter.markdown, metadata)
         except ValueError as exc:
             raise BookError(
                 f"generated SSMD for source chapter {chapter.source_number} is invalid: {exc}"
@@ -105,7 +114,7 @@ def convert_book(
 
     return Book(
         source=inspection.source,
-        metadata=inspection.metadata,
+        metadata=metadata,
         chapters=tuple(book_chapters),
         source_sha256=source_sha256,
         source_chapter_count=len(inspection.chapters),

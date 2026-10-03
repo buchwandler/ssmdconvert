@@ -21,6 +21,12 @@ ssmdconvert book convert novel.epub --chapters 2-20 -o selected.ssmdbook
 
 Selectors use original 1-based source chapter numbers. They address the complete source inventory, even when the output contains only a subset. Selected chapters always remain in source order. Duplicate numbers do not duplicate chapters. Missing chapters, zero or negative numbers, reversed ranges, and malformed tokens raise `ChapterSelectionError`.
 
+Book conversion also accepts `--sequence-fallback-mode spell|preserve`. The default is `spell`; the chosen value is written to the book manifest and mirrored in every chapter so extracted chapters remain self-contained.
+
+```bash
+ssmdconvert book convert novel.epub --sequence-fallback-mode preserve -o novel.ssmdbook
+```
+
 ## Write and validate bundles
 
 A directory bundle is editable. A ZIP bundle is portable. Both use the same manifest and chapter documents:

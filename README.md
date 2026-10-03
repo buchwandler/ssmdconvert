@@ -33,6 +33,13 @@ ssmdconvert inspect manuscript.md --json
 
 PDF and DOCX conversion require their corresponding optional extras. Writes are atomic, refuse existing destinations by default, and support `--force` to replace an existing output. The input file is never a valid output destination, even with `--force`.
 
+Both `convert` and `book convert` accept `--sequence-fallback-mode spell|preserve`. The default is `spell`, and the selected value is stored in standalone SSMD front matter, book manifest metadata, and each generated chapter.
+
+```bash
+ssmdconvert convert manuscript.md --sequence-fallback-mode preserve -o manuscript.ssmd
+ssmdconvert book convert novel.epub --sequence-fallback-mode preserve -o novel.ssmdbook
+```
+
 ## Convert an EPUB book
 
 ```bash

@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from epub_support import make_epub
+from ssmd import parse_structure
 
 from ssmdconvert import (
     BookBundleError,
@@ -424,3 +425,46 @@ def test_bundle_validation_uses_the_loader(tmp_path: Path) -> None:
     archive = write_book_bundle(book, tmp_path / "book.zip", format="zip")
 
     assert validate_book_bundle(archive) is None
+
+
+@pytest.mark.parametrize("format", ["directory", "zip"])
+def test_bundle_roundtrip_preserves_sequence_fallback_mode(tmp_path: Path, format: str) -> None:
+    source = tmp_path / "book.epub"
+    make_epub(source)
+    book = convert_book(source, sequence_fallback_mode="preserve")
+    output = tmp_path / ("preserve.ssmdbook" if format == "directory" else "preserve.ssmdbook.zip")
+
+    bundle = write_book_bundle(book, output, format=format)  # type: ignore[arg-type]
+    loaded = load_book_bundle(bundle)
+
+    assert loaded.metadata["sequence_fallback_mode"] == "preserve"
+    for chapter in loaded.chapters:
+        assert (
+            parse_structure(chapter.ssmd, dialect="0.9").header["sequence_fallback_mode"]
+            == "preserve"
+        )
+    if format == "directory":
+        manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["schema_version"] == 1
+        assert manifest["metadata"]["sequence_fallback_mode"] == "preserve"
+
+
+def test_bundle_without_sequence_fallback_metadata_remains_valid(tmp_path: Path) -> None:
+    _source, book = _book(tmp_path)
+    bundle = write_book_bundle(book, tmp_path / "old.ssmdbook", format="directory")
+    manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    del manifest["metadata"]["sequence_fallback_mode"]
+    for chapter in manifest["chapters"]:
+        path = bundle / chapter["path"]
+        content = path.read_text(encoding="utf-8")
+        legacy_content = content.replace("sequence_fallback_mode: spell\n", "")
+        assert legacy_content != content
+        path.write_text(legacy_content, encoding="utf-8")
+        chapter["sha256"] = hashlib.sha256(legacy_content.encode("utf-8")).hexdigest()
+    _write_manifest(bundle, manifest)
+
+    loaded = load_book_bundle(bundle)
+
+    assert "sequence_fallback_mode" not in loaded.metadata
+    for chapter in loaded.chapters:
+        assert "sequence_fallback_mode" not in parse_structure(chapter.ssmd, dialect="0.9").header

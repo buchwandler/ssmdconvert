@@ -16,7 +16,8 @@ ssmd_version:   0.9
   "schema_version": 1,
   "ssmd_version": "0.9",
   "metadata": {
-    "title": "Example Book"
+    "title": "Example Book",
+    "sequence_fallback_mode": "spell"
   },
   "source": {
     "format": "epub",
@@ -43,6 +44,8 @@ ssmd_version:   0.9
   ]
 }
 ```
+
+`metadata.sequence_fallback_mode` is application metadata with the values `spell` and `preserve`. New conversions always write it, defaulting to `spell`; each chapter mirrors the same setting in its SSMD front matter. Older bundles may omit the value and remain valid. Consumers should treat absence as `spell` and reject any present unsupported value.
 
 The `chapters` array order is authoritative for book order. Consumers must not sort directory entries or filenames to infer order. Chapter IDs are canonical `chapter-NNNN` identities; each bundle path is derived from the ID. `source_id` and `source_parent_id` preserve EPUB navigation identifiers, while `parent_id` refers to a canonical chapter ID when the parent appears in the book inventory.
 

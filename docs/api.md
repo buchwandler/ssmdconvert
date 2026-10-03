@@ -18,6 +18,12 @@ The core names documented here are exported from `ssmdconvert` and listed in `ss
 
 `Converter.convert()` returns one combined SSMD document. Input paths ending in `.ssmd` or `.ssmd.md` are recognized case-insensitively and parsed as SSMD before being rendered.
 
+`Converter.convert()`, the convenience `convert()`, and `convert_content()` accept `sequence_fallback_mode`, which may be `spell` or `preserve`. The default is `spell`; the selected value is written to the generated SSMD front matter and normalized document metadata.
+
+```python
+result = convert("manuscript.md", sequence_fallback_mode="preserve")
+```
+
 ## Source-neutral models
 
 ```{autoclass} ssmdconvert.SourceInfo
@@ -61,6 +67,12 @@ The core names documented here are exported from `ssmdconvert` and listed in `ss
 ```
 
 `BookChapter.id` is the canonical chapter identity. `source_id` and `source_parent_id` preserve source navigation identifiers; `parent_id` refers to the canonical parent chapter ID when present in the inventory. `Book.source_sha256` is captured during conversion.
+
+`convert_book()` accepts the same policy, defaults to `spell`, and records it in `Book.metadata` and each generated chapter. For example:
+
+```python
+book = convert_book("novel.epub", sequence_fallback_mode="preserve")
+```
 
 ## Bundles
 
@@ -115,6 +127,8 @@ The writer requires `format="directory"` or `format="zip"`. Existing destination
 ## Optional speech preparation
 
 Install the `[speech]` extra before importing `ssmdconvert.speech`. These APIs are separate from core conversion and do not alter conversion output unless called explicitly.
+
+`SpeechPreparationOptions.sequence_fallback_mode` uses the same `spell` or `preserve` values and defaults to `spell`.
 
 ```python
 from ssmdconvert.speech import SpeechPreparationOptions, prepare_ssmd_for_speech
