@@ -460,7 +460,7 @@ def test_bundle_without_sequence_fallback_metadata_remains_valid(tmp_path: Path)
         legacy_content = content.replace("sequence_fallback_mode: spell\n", "")
         assert legacy_content != content
         path.write_text(legacy_content, encoding="utf-8")
-        chapter["sha256"] = hashlib.sha256(legacy_content.encode("utf-8")).hexdigest()
+        chapter["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
     _write_manifest(bundle, manifest)
 
     loaded = load_book_bundle(bundle)
