@@ -1,4 +1,4 @@
-from .base import InputAdapter
+from .base import ContentAdapter, InputAdapter
 from .docx import DocxAdapter
 from .epub import EpubAdapter
 from .html import HtmlAdapter
@@ -21,7 +21,13 @@ def default_adapters() -> list[InputAdapter]:
     ]
 
 
+def default_content_adapters() -> dict[str, ContentAdapter]:
+    adapters: tuple[ContentAdapter, ...] = (TextAdapter(), MarkdownAdapter(), HtmlAdapter())
+    return {adapter.name: adapter for adapter in adapters}
+
+
 __all__ = [
+    "ContentAdapter",
     "DocxAdapter",
     "EpubAdapter",
     "HtmlAdapter",
@@ -31,4 +37,5 @@ __all__ = [
     "SsmdAdapter",
     "TextAdapter",
     "default_adapters",
+    "default_content_adapters",
 ]

@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Literal
 
-from .adapters import InputAdapter, default_adapters
+from .adapters import (
+    ContentAdapter,
+    InputAdapter,
+    default_adapters,
+    default_content_adapters,
+)
 from .errors import UnsupportedInputError
 from .models import ConversionResult, Document
 from .render import render_document
+
+ContentInputFormat = Literal["text", "markdown", "html"]
 
 
 class Converter:
@@ -14,6 +22,7 @@ class Converter:
 
     def __init__(self, adapters: Iterable[InputAdapter] | None = None) -> None:
         self.adapters = list(adapters) if adapters is not None else default_adapters()
+        self.content_adapters: dict[str, ContentAdapter] = default_content_adapters()
 
     def adapter_for(self, source: str | Path) -> InputAdapter:
         """Select the adapter that supports a source path."""
@@ -33,6 +42,22 @@ class Converter:
             raise FileNotFoundError(path)
         return self.adapter_for(path).load(path)
 
+    def _render(
+        self,
+        document: Document,
+        *,
+        title: str | None,
+        author: str | None = None,
+        language: str | None,
+    ) -> ConversionResult:
+        if title is not None:
+            document.metadata["title"] = title
+        if author is not None:
+            document.metadata["author"] = author
+        if language is not None:
+            document.metadata["language"] = language
+        return ConversionResult(document=document, ssmd=render_document(document))
+
     def convert(
         self,
         source: str | Path,
@@ -42,14 +67,28 @@ class Converter:
         language: str | None = None,
     ) -> ConversionResult:
         """Convert a source into one combined SSMD document."""
-        document = self.load(source)
-        if title is not None:
-            document.metadata["title"] = title
-        if author is not None:
-            document.metadata["author"] = author
-        if language is not None:
-            document.metadata["language"] = language
-        return ConversionResult(document=document, ssmd=render_document(document))
+        return self._render(
+            self.load(source), title=title, author=author, language=language
+        )
+
+    def convert_content(
+        self,
+        content: str,
+        *,
+        input_format: ContentInputFormat,
+        source_name: str = "<memory>",
+        title: str | None = None,
+        language: str | None = None,
+    ) -> ConversionResult:
+        """Convert in-memory text, Markdown, or HTML into one SSMD document."""
+        adapter = self.content_adapters.get(input_format)
+        if adapter is None:
+            supported = ", ".join(sorted(self.content_adapters))
+            raise UnsupportedInputError(
+                f"Unsupported content format: {input_format}; adapters: {supported}"
+            )
+        document = adapter.load_content(content, source_name)
+        return self._render(document, title=title, language=language)
 
 
 def convert(
@@ -61,3 +100,21 @@ def convert(
 ) -> ConversionResult:
     """Convert a source path with the default adapters."""
     return Converter().convert(source, title=title, author=author, language=language)
+
+
+def convert_content(
+    content: str,
+    *,
+    input_format: ContentInputFormat,
+    source_name: str = "<memory>",
+    title: str | None = None,
+    language: str | None = None,
+) -> ConversionResult:
+    """Convert in-memory text, Markdown, or HTML with the default adapters."""
+    return Converter().convert_content(
+        content,
+        input_format=input_format,
+        source_name=source_name,
+        title=title,
+        language=language,
+    )

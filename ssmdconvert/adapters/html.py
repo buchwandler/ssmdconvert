@@ -149,10 +149,17 @@ class HtmlAdapter:
         return source.suffix.lower() in self.suffixes
 
     def load(self, source: Path) -> Document:
-        markdown, title, first_heading = html_to_markdown(read_text_file(source))
-        metadata = {"title": title or first_heading or source.stem}
+        return self.load_content(read_text_file(source), source.name, source)
+
+    def load_content(
+        self, content: str, source_name: str, source_path: Path | None = None
+    ) -> Document:
+        markdown, title, first_heading = html_to_markdown(content)
+        metadata = {"title": title or first_heading or Path(source_name).stem}
         return Document(
-            source=SourceInfo(format="html", media_type="text/html", path=source, name=source.name),
+            source=SourceInfo(
+                format="html", media_type="text/html", path=source_path, name=source_name
+            ),
             sections=[Section("section-0001", markdown, first_heading)],
             metadata=metadata,
         )

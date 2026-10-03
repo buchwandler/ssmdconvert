@@ -49,6 +49,7 @@ Chapter selectors use original 1-based source numbers. Selected chapters remain 
 ```python
 from ssmdconvert import (
     convert,
+    convert_content,
     convert_book,
     inspect_book,
     load_book_bundle,
@@ -57,6 +58,9 @@ from ssmdconvert import (
 )
 
 result = convert("manuscript.md")
+content = convert_content(
+    "# Notes\n\nRead this.", input_format="markdown", source_name="notes.md"
+)
 inspection = inspect_book("novel.epub")
 book = convert_book("novel.epub", chapters="2-20")
 write_book_bundle(book, "selected.ssmdbook", format="directory")

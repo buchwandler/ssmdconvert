@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ..models import Document, Section, SourceInfo
 from .common import is_ssmd_path, read_text_file
+from .markdown_speech import markdown_to_speech
 
 _H1_RE = re.compile(r"^#\s+(.+?)\s*$")
 
@@ -35,16 +36,25 @@ class MarkdownAdapter:
         return source.suffix.lower() in self.suffixes and not is_ssmd_path(source)
 
     def load(self, source: Path) -> Document:
-        text = read_text_file(source)
-        sections = [
-            Section(id=f"section-{index:04d}", title=title, markdown=body)
-            for index, (title, body) in enumerate(split_markdown(text), start=1)
-            if body
-        ]
+        return self.load_content(read_text_file(source), source.name, source)
+
+    def load_content(
+        self, content: str, source_name: str, source_path: Path | None = None
+    ) -> Document:
+        sections = []
+        for index, (title, body) in enumerate(split_markdown(content), start=1):
+            speech = markdown_to_speech(body)
+            if speech:
+                sections.append(
+                    Section(id=f"section-{index:04d}", title=title, markdown=speech)
+                )
         return Document(
             source=SourceInfo(
-                format="markdown", media_type="text/markdown", path=source, name=source.name
+                format="markdown",
+                media_type="text/markdown",
+                path=source_path,
+                name=source_name,
             ),
             sections=sections or [Section("section-0001", "")],
-            metadata={"title": source.stem},
+            metadata={"title": Path(source_name).stem},
         )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .books import convert_book, inspect_book
 from .bundle import load_book_bundle, validate_book_bundle, write_book_bundle
-from .converter import Converter, convert
+from .converter import Converter, convert, convert_content
 from .errors import (
     BookBundleError,
     BookBundleValidationError,
@@ -57,6 +57,7 @@ __all__ = [
     "__version__",
     "convert",
     "convert_book",
+    "convert_content",
     "inspect_book",
     "load_book_bundle",
     "validate_book_bundle",

@@ -12,3 +12,11 @@ class InputAdapter(Protocol):
     def supports(self, source: Path) -> bool: ...
 
     def load(self, source: Path) -> Document: ...
+
+
+class ContentAdapter(Protocol):
+    name: str
+
+    def load_content(
+        self, content: str, source_name: str, source_path: Path | None = None
+    ) -> Document: ...

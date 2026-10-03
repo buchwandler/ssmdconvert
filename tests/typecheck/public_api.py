@@ -13,6 +13,7 @@ from ssmdconvert import (
     UnsupportedInputError,
     convert,
     convert_book,
+    convert_content,
     inspect_book,
     load_book_bundle,
     validate_book_bundle,
@@ -23,6 +24,9 @@ source = Path("book.epub")
 converter: Converter = Converter()
 result: ConversionResult = converter.convert(source, language="en")
 converted: ConversionResult = convert(source, title="A Book", author="An Author")
+content_result: ConversionResult = convert_content(
+    "# Notes\n\nRead this.", input_format="markdown", source_name="notes.md"
+)
 inspection: BookInspection = inspect_book(source)
 source_info: SourceInfo = inspection.source
 source_path: Path | None = source_info.path
