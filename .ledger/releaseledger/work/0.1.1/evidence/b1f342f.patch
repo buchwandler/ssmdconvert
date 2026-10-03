@@ -1,0 +1,825 @@
+ README.md                              |  7 +++
+ docs/api.md                            | 14 +++++
+ docs/books.md                          |  6 +++
+ docs/bundle-format.md                  |  5 +-
+ docs/usage.md                          | 11 +++-
+ ssmdconvert/adapters/markdown.py       |  4 +-
+ ssmdconvert/books.py                   | 13 ++++-
+ ssmdconvert/cli.py                     | 28 +++++++++-
+ ssmdconvert/converter.py               | 36 +++++++++++--
+ ssmdconvert/policy.py                  | 15 ++++++
+ ssmdconvert/render.py                  |  2 +
+ ssmdconvert/speech/models.py           | 11 ++--
+ tests/test_book_bundle.py              | 44 +++++++++++++++
+ tests/test_book_conversion.py          | 28 +++++++++-
+ tests/test_cli.py                      | 98 +++++++++++++++++++++++++++++++++-
+ tests/test_converter_api.py            | 47 ++++++++++++++++
+ tests/test_markdown_html.py            |  8 +--
+ tests/test_sequence_fallback_policy.py | 30 +++++++++++
+ 18 files changed, 382 insertions(+), 25 deletions(-)
+
+diff --git a/README.md b/README.md
+index 22a9c47..fdf61c4 100644
+--- a/README.md
++++ b/README.md
+@@ -33,6 +33,13 @@ ssmdconvert inspect manuscript.md --json
+
+ PDF and DOCX conversion require their corresponding optional extras. Writes are atomic, refuse existing destinations by default, and support `--force` to replace an existing output. The input file is never a valid output destination, even with `--force`.
+
++Both `convert` and `book convert` accept `--sequence-fallback-mode spell|preserve`. The default is `spell`, and the selected value is stored in standalone SSMD front matter, book manifest metadata, and each generated chapter.
++
++```bash
++ssmdconvert convert manuscript.md --sequence-fallback-mode preserve -o manuscript.ssmd
++ssmdconvert book convert novel.epub --sequence-fallback-mode preserve -o novel.ssmdbook
++```
++
+ ## Convert an EPUB book
+
+ ```bash
+diff --git a/docs/api.md b/docs/api.md
+index 85c9393..608eecd 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -18,6 +18,12 @@ The core names documented here are exported from `ssmdconvert` and listed in `ss
+
+ `Converter.convert()` returns one combined SSMD document. Input paths ending in `.ssmd` or `.ssmd.md` are recognized case-insensitively and parsed as SSMD before being rendered.
+
++`Converter.convert()`, the convenience `convert()`, and `convert_content()` accept `sequence_fallback_mode`, which may be `spell` or `preserve`. The default is `spell`; the selected value is written to the generated SSMD front matter and normalized document metadata.
++
++```python
++result = convert("manuscript.md", sequence_fallback_mode="preserve")
++```
++
+ ## Source-neutral models
+
+ ```{autoclass} ssmdconvert.SourceInfo
+@@ -62,6 +68,12 @@ The core names documented here are exported from `ssmdconvert` and listed in `ss
+
+ `BookChapter.id` is the canonical chapter identity. `source_id` and `source_parent_id` preserve source navigation identifiers; `parent_id` refers to the canonical parent chapter ID when present in the inventory. `Book.source_sha256` is captured during conversion.
+
++`convert_book()` accepts the same policy, defaults to `spell`, and records it in `Book.metadata` and each generated chapter. For example:
++
++```python
++book = convert_book("novel.epub", sequence_fallback_mode="preserve")
++```
++
+ ## Bundles
+
+ ```{autofunction} ssmdconvert.write_book_bundle
+@@ -116,6 +128,8 @@ The writer requires `format="directory"` or `format="zip"`. Existing destination
+
+ Install the `[speech]` extra before importing `ssmdconvert.speech`. These APIs are separate from core conversion and do not alter conversion output unless called explicitly.
+
++`SpeechPreparationOptions.sequence_fallback_mode` uses the same `spell` or `preserve` values and defaults to `spell`.
++
+ ```python
+ from ssmdconvert.speech import SpeechPreparationOptions, prepare_ssmd_for_speech
+
+diff --git a/docs/books.md b/docs/books.md
+index d14bc20..60638e7 100644
+--- a/docs/books.md
++++ b/docs/books.md
+@@ -21,6 +21,12 @@ ssmdconvert book convert novel.epub --chapters 2-20 -o selected.ssmdbook
+
+ Selectors use original 1-based source chapter numbers. They address the complete source inventory, even when the output contains only a subset. Selected chapters always remain in source order. Duplicate numbers do not duplicate chapters. Missing chapters, zero or negative numbers, reversed ranges, and malformed tokens raise `ChapterSelectionError`.
+
++Book conversion also accepts `--sequence-fallback-mode spell|preserve`. The default is `spell`; the chosen value is written to the book manifest and mirrored in every chapter so extracted chapters remain self-contained.
++
++```bash
++ssmdconvert book convert novel.epub --sequence-fallback-mode preserve -o novel.ssmdbook
++```
++
+ ## Write and validate bundles
+
+ A directory bundle is editable. A ZIP bundle is portable. Both use the same manifest and chapter documents:
+diff --git a/docs/bundle-format.md b/docs/bundle-format.md
+index b6358d6..d06a64a 100644
+--- a/docs/bundle-format.md
++++ b/docs/bundle-format.md
+@@ -16,7 +16,8 @@ ssmd_version:   0.9
+   "schema_version": 1,
+   "ssmd_version": "0.9",
+   "metadata": {
+-    "title": "Example Book"
++    "title": "Example Book",
++    "sequence_fallback_mode": "spell"
+   },
+   "source": {
+     "format": "epub",
+@@ -44,6 +45,8 @@ ssmd_version:   0.9
+ }
+ ```
+
++`metadata.sequence_fallback_mode` is application metadata with the values `spell` and `preserve`. New conversions always write it, defaulting to `spell`; each chapter mirrors the same setting in its SSMD front matter. Older bundles may omit the value and remain valid. Consumers should treat absence as `spell` and reject any present unsupported value.
++
+ The `chapters` array order is authoritative for book order. Consumers must not sort directory entries or filenames to infer order. Chapter IDs are canonical `chapter-NNNN` identities; each bundle path is derived from the ID. `source_id` and `source_parent_id` preserve EPUB navigation identifiers, while `parent_id` refers to a canonical chapter ID when the parent appears in the book inventory.
+
+ Each chapter file is an independently valid SSMD 0.9 document. Source and chapter SHA-256 values detect changed or corrupted data. The source hash is captured by `convert_book()` and stored with the resulting `Book`; writing a bundle does not reread or rehash the EPUB. Loading a bundle retains source name, format, and media type, but cannot provide a local source path.
+diff --git a/docs/usage.md b/docs/usage.md
+index 60ab8f2..9a56af6 100644
+--- a/docs/usage.md
++++ b/docs/usage.md
+@@ -3,7 +3,7 @@
+ ## Convert a document
+
+ ```bash
+-ssmdconvert convert INPUT [-o OUTPUT] [--title TITLE] [--author AUTHOR] [--language LANGUAGE]
++ssmdconvert convert INPUT [-o OUTPUT] [--title TITLE] [--author AUTHOR] [--language LANGUAGE] [--sequence-fallback-mode spell|preserve]
+ ```
+
+ Examples:
+@@ -31,6 +31,13 @@ ssmdconvert convert manuscript.txt \
+   --language en
+ ```
+
++The sequence fallback policy controls residual sequence handling for downstream speech preparation. Both conversion commands accept `spell` or `preserve`; the default is `spell`. The chosen value is persisted in SSMD front matter and, for books, in manifest metadata and every chapter.
++
++```bash
++ssmdconvert convert manuscript.md --sequence-fallback-mode preserve -o manuscript.ssmd
++ssmdconvert book convert novel.epub --sequence-fallback-mode preserve -o novel.ssmdbook
++```
++
+ ## Inspect a source
+
+ Inspect the selected local adapter and normalized document without writing output:
+@@ -48,7 +55,7 @@ The book CLI uses explicit subcommands:
+
+ ```bash
+ ssmdconvert book inspect novel.epub [--json]
+-ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT]
++ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [--sequence-fallback-mode spell|preserve]
+ ssmdconvert book validate BUNDLE [--json]
+ ```
+
+diff --git a/ssmdconvert/adapters/markdown.py b/ssmdconvert/adapters/markdown.py
+index 41c608c..3c3278d 100644
+--- a/ssmdconvert/adapters/markdown.py
++++ b/ssmdconvert/adapters/markdown.py
+@@ -45,9 +45,7 @@ class MarkdownAdapter:
+         for index, (title, body) in enumerate(split_markdown(content), start=1):
+             speech = markdown_to_speech(body)
+             if speech:
+-                sections.append(
+-                    Section(id=f"section-{index:04d}", title=title, markdown=speech)
+-                )
++                sections.append(Section(id=f"section-{index:04d}", title=title, markdown=speech))
+         return Document(
+             source=SourceInfo(
+                 format="markdown",
+diff --git a/ssmdconvert/books.py b/ssmdconvert/books.py
+index 972c119..cbbc8ab 100644
+--- a/ssmdconvert/books.py
++++ b/ssmdconvert/books.py
+@@ -7,6 +7,11 @@ from ._epub import ExtractedChapter, load_epub
+ from .chapter_selection import parse_chapter_selection
+ from .errors import BookError
+ from .models import Book, BookChapter, BookInspection, BookInspectionChapter, SourceInfo
++from .policy import (
++    DEFAULT_SEQUENCE_FALLBACK_MODE,
++    SequenceFallbackMode,
++    validate_sequence_fallback_mode,
++)
+ from .render import render_standalone_chapter
+
+
+@@ -65,9 +70,13 @@ def convert_book(
+     source: str | Path,
+     *,
+     chapters: str | None = "all",
++    sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
+ ) -> Book:
+     """Convert selected EPUB chapters to standalone SSMD in source order."""
++    mode = validate_sequence_fallback_mode(sequence_fallback_mode)
+     inspection, extracted_chapters = _inspect_epub(source)
++    metadata = dict(inspection.metadata)
++    metadata["sequence_fallback_mode"] = mode
+     source_path = inspection.source.path
+     assert source_path is not None
+     source_sha256 = _source_sha256(source_path)
+@@ -82,7 +91,7 @@ def convert_book(
+         if chapter.source_number not in selected:
+             continue
+         try:
+-            ssmd = render_standalone_chapter(chapter.title, chapter.markdown, inspection.metadata)
++            ssmd = render_standalone_chapter(chapter.title, chapter.markdown, metadata)
+         except ValueError as exc:
+             raise BookError(
+                 f"generated SSMD for source chapter {chapter.source_number} is invalid: {exc}"
+@@ -105,7 +114,7 @@ def convert_book(
+
+     return Book(
+         source=inspection.source,
+-        metadata=inspection.metadata,
++        metadata=metadata,
+         chapters=tuple(book_chapters),
+         source_sha256=source_sha256,
+         source_chapter_count=len(inspection.chapters),
+diff --git a/ssmdconvert/cli.py b/ssmdconvert/cli.py
+index bebda2f..7ff3ff1 100644
+--- a/ssmdconvert/cli.py
++++ b/ssmdconvert/cli.py
+@@ -5,6 +5,7 @@ import os
+ import tempfile
+ from collections.abc import Callable
+ from dataclasses import asdict
++from enum import Enum
+ from pathlib import Path
+ from typing import Annotated, Literal
+
+@@ -21,6 +22,11 @@ book_app = typer.Typer(help="Inspect and convert EPUB books.", no_args_is_help=T
+ app.add_typer(book_app, name="book")
+
+
++class SequenceFallbackModeOption(str, Enum):
++    spell = "spell"
++    preserve = "preserve"
++
++
+ def _version(value: bool) -> None:
+     if value:
+         typer.echo(__version__)
+@@ -133,6 +139,10 @@ def convert(
+     title: Annotated[str | None, typer.Option("--title")] = None,
+     author: Annotated[str | None, typer.Option("--author")] = None,
+     language: Annotated[str | None, typer.Option("--language")] = None,
++    sequence_fallback_mode: Annotated[
++        SequenceFallbackModeOption,
++        typer.Option("--sequence-fallback-mode"),
++    ] = SequenceFallbackModeOption.spell,
+     force: Annotated[
+         bool, typer.Option("--force", help="Replace an existing output file.")
+     ] = False,
+@@ -140,7 +150,13 @@ def convert(
+     """Convert a supported input into one SSMD document."""
+
+     def run() -> None:
+-        result = Converter().convert(source, title=title, author=author, language=language)
++        result = Converter().convert(
++            source,
++            title=title,
++            author=author,
++            language=language,
++            sequence_fallback_mode=sequence_fallback_mode.value,
++        )
+         destination = output or source.with_suffix(".ssmd")
+         _write_text_atomically(result.ssmd, destination, source=source, force=force)
+         typer.echo(f"Converted {source} -> {_output_path(destination)}")
+@@ -223,13 +239,21 @@ def book_convert(
+     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+     chapters: Annotated[str, typer.Option("--chapters")] = "all",
++    sequence_fallback_mode: Annotated[
++        SequenceFallbackModeOption,
++        typer.Option("--sequence-fallback-mode"),
++    ] = SequenceFallbackModeOption.spell,
+     bundle_format: Annotated[str | None, typer.Option("--format")] = None,
+     force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
+ ) -> None:
+     """Convert an EPUB into an SSMD book bundle."""
+
+     def run() -> None:
+-        book = convert_book(source, chapters=chapters)
++        book = convert_book(
++            source,
++            chapters=chapters,
++            sequence_fallback_mode=sequence_fallback_mode.value,
++        )
+         destination = output or source.with_suffix(".ssmdbook")
+         _reject_input_overwrite(source, _output_path(destination))
+         selected_format = _book_output_format(destination, bundle_format)
+diff --git a/ssmdconvert/converter.py b/ssmdconvert/converter.py
+index 9833115..07ecfea 100644
+--- a/ssmdconvert/converter.py
++++ b/ssmdconvert/converter.py
+@@ -12,6 +12,11 @@ from .adapters import (
+ )
+ from .errors import UnsupportedInputError
+ from .models import ConversionResult, Document
++from .policy import (
++    DEFAULT_SEQUENCE_FALLBACK_MODE,
++    SequenceFallbackMode,
++    validate_sequence_fallback_mode,
++)
+ from .render import render_document
+
+ ContentInputFormat = Literal["text", "markdown", "html"]
+@@ -49,6 +54,7 @@ class Converter:
+         title: str | None,
+         author: str | None = None,
+         language: str | None,
++        sequence_fallback_mode: SequenceFallbackMode,
+     ) -> ConversionResult:
+         if title is not None:
+             document.metadata["title"] = title
+@@ -56,6 +62,7 @@ class Converter:
+             document.metadata["author"] = author
+         if language is not None:
+             document.metadata["language"] = language
++        document.metadata["sequence_fallback_mode"] = sequence_fallback_mode
+         return ConversionResult(document=document, ssmd=render_document(document))
+
+     def convert(
+@@ -65,10 +72,17 @@ class Converter:
+         title: str | None = None,
+         author: str | None = None,
+         language: str | None = None,
++        sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
+     ) -> ConversionResult:
+         """Convert a source into one combined SSMD document."""
++        mode = validate_sequence_fallback_mode(sequence_fallback_mode)
++        document = self.load(source)
+         return self._render(
+-            self.load(source), title=title, author=author, language=language
++            document,
++            title=title,
++            author=author,
++            language=language,
++            sequence_fallback_mode=mode,
+         )
+
+     def convert_content(
+@@ -79,8 +93,10 @@ class Converter:
+         source_name: str = "<memory>",
+         title: str | None = None,
+         language: str | None = None,
++        sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
+     ) -> ConversionResult:
+         """Convert in-memory text, Markdown, or HTML into one SSMD document."""
++        mode = validate_sequence_fallback_mode(sequence_fallback_mode)
+         adapter = self.content_adapters.get(input_format)
+         if adapter is None:
+             supported = ", ".join(sorted(self.content_adapters))
+@@ -88,7 +104,12 @@ class Converter:
+                 f"Unsupported content format: {input_format}; adapters: {supported}"
+             )
+         document = adapter.load_content(content, source_name)
+-        return self._render(document, title=title, language=language)
++        return self._render(
++            document,
++            title=title,
++            language=language,
++            sequence_fallback_mode=mode,
++        )
+
+
+ def convert(
+@@ -97,9 +118,16 @@ def convert(
+     title: str | None = None,
+     author: str | None = None,
+     language: str | None = None,
++    sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
+ ) -> ConversionResult:
+     """Convert a source path with the default adapters."""
+-    return Converter().convert(source, title=title, author=author, language=language)
++    return Converter().convert(
++        source,
++        title=title,
++        author=author,
++        language=language,
++        sequence_fallback_mode=sequence_fallback_mode,
++    )
+
+
+ def convert_content(
+@@ -109,6 +137,7 @@ def convert_content(
+     source_name: str = "<memory>",
+     title: str | None = None,
+     language: str | None = None,
++    sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
+ ) -> ConversionResult:
+     """Convert in-memory text, Markdown, or HTML with the default adapters."""
+     return Converter().convert_content(
+@@ -117,4 +146,5 @@ def convert_content(
+         source_name=source_name,
+         title=title,
+         language=language,
++        sequence_fallback_mode=sequence_fallback_mode,
+     )
+diff --git a/ssmdconvert/policy.py b/ssmdconvert/policy.py
+new file mode 100644
+index 0000000..3141e57
+--- /dev/null
++++ b/ssmdconvert/policy.py
+@@ -0,0 +1,15 @@
++from __future__ import annotations
++
++from typing import Literal
++
++SequenceFallbackMode = Literal["preserve", "spell"]
++DEFAULT_SEQUENCE_FALLBACK_MODE: SequenceFallbackMode = "spell"
++
++
++def validate_sequence_fallback_mode(value: object) -> SequenceFallbackMode:
++    """Return a supported sequence fallback policy or raise a clear error."""
++    if value == "preserve":
++        return "preserve"
++    if value == "spell":
++        return "spell"
++    raise ValueError("sequence_fallback_mode must be 'preserve' or 'spell'")
+diff --git a/ssmdconvert/render.py b/ssmdconvert/render.py
+index 6ba505c..9c07a6f 100644
+--- a/ssmdconvert/render.py
++++ b/ssmdconvert/render.py
+@@ -46,6 +46,8 @@ def render_standalone_chapter(
+     if authors:
+         header["author"] = authors[0]
+     body = markdown.rstrip() + "\n" if markdown else ""
++    if metadata.get("sequence_fallback_mode") is not None:
++        header["sequence_fallback_mode"] = metadata["sequence_fallback_mode"]
+     result = serialize_front_matter(header, body)
+     validate_ssmd_document(result)
+     return result
+diff --git a/ssmdconvert/speech/models.py b/ssmdconvert/speech/models.py
+index ebc13f6..194b6ab 100644
+--- a/ssmdconvert/speech/models.py
++++ b/ssmdconvert/speech/models.py
+@@ -8,6 +8,12 @@ from dataclasses import asdict, dataclass, field
+ from types import MappingProxyType
+ from typing import Any, Literal
+
++from ..policy import (
++    DEFAULT_SEQUENCE_FALLBACK_MODE,
++    SequenceFallbackMode,
++    validate_sequence_fallback_mode,
++)
++
+
+ @dataclass(frozen=True, slots=True)
+ class SpeechPreparationOptions:
+@@ -16,14 +22,13 @@ class SpeechPreparationOptions:
+     mode: Literal["off", "audit", "annotate"] = "off"
+     language: str | None = None
+     strict: bool = False
+-    sequence_fallback_mode: Literal["preserve", "spell"] = "spell"
++    sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE
+     pronunciations: Mapping[str, str] = field(default_factory=dict)
+
+     def __post_init__(self) -> None:
+         if self.mode not in {"off", "audit", "annotate"}:
+             raise ValueError("mode must be 'off', 'audit', or 'annotate'")
+-        if self.sequence_fallback_mode not in {"preserve", "spell"}:
+-            raise ValueError("sequence_fallback_mode must be 'preserve' or 'spell'")
++        validate_sequence_fallback_mode(self.sequence_fallback_mode)
+         if self.language is not None and (
+             not isinstance(self.language, str) or not self.language.strip()
+         ):
+diff --git a/tests/test_book_bundle.py b/tests/test_book_bundle.py
+index 2c23ed8..92cb12d 100644
+--- a/tests/test_book_bundle.py
++++ b/tests/test_book_bundle.py
+@@ -11,6 +11,7 @@ from typing import Any
+
+ import pytest
+ from epub_support import make_epub
++from ssmd import parse_structure
+
+ from ssmdconvert import (
+     BookBundleError,
+@@ -424,3 +425,46 @@ def test_bundle_validation_uses_the_loader(tmp_path: Path) -> None:
+     archive = write_book_bundle(book, tmp_path / "book.zip", format="zip")
+
+     assert validate_book_bundle(archive) is None
++
++
++@pytest.mark.parametrize("format", ["directory", "zip"])
++def test_bundle_roundtrip_preserves_sequence_fallback_mode(tmp_path: Path, format: str) -> None:
++    source = tmp_path / "book.epub"
++    make_epub(source)
++    book = convert_book(source, sequence_fallback_mode="preserve")
++    output = tmp_path / ("preserve.ssmdbook" if format == "directory" else "preserve.ssmdbook.zip")
++
++    bundle = write_book_bundle(book, output, format=format)  # type: ignore[arg-type]
++    loaded = load_book_bundle(bundle)
++
++    assert loaded.metadata["sequence_fallback_mode"] == "preserve"
++    for chapter in loaded.chapters:
++        assert (
++            parse_structure(chapter.ssmd, dialect="0.9").header["sequence_fallback_mode"]
++            == "preserve"
++        )
++    if format == "directory":
++        manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
++        assert manifest["schema_version"] == 1
++        assert manifest["metadata"]["sequence_fallback_mode"] == "preserve"
++
++
++def test_bundle_without_sequence_fallback_metadata_remains_valid(tmp_path: Path) -> None:
++    _source, book = _book(tmp_path)
++    bundle = write_book_bundle(book, tmp_path / "old.ssmdbook", format="directory")
++    manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
++    del manifest["metadata"]["sequence_fallback_mode"]
++    for chapter in manifest["chapters"]:
++        path = bundle / chapter["path"]
++        content = path.read_text(encoding="utf-8")
++        legacy_content = content.replace("sequence_fallback_mode: spell\n", "")
++        assert legacy_content != content
++        path.write_text(legacy_content, encoding="utf-8")
++        chapter["sha256"] = hashlib.sha256(legacy_content.encode("utf-8")).hexdigest()
++    _write_manifest(bundle, manifest)
++
++    loaded = load_book_bundle(bundle)
++
++    assert "sequence_fallback_mode" not in loaded.metadata
++    for chapter in loaded.chapters:
++        assert "sequence_fallback_mode" not in parse_structure(chapter.ssmd, dialect="0.9").header
+diff --git a/tests/test_book_conversion.py b/tests/test_book_conversion.py
+index d5948cb..bdeabd0 100644
+--- a/tests/test_book_conversion.py
++++ b/tests/test_book_conversion.py
+@@ -1,7 +1,7 @@
+ from pathlib import Path
+
+ from epub_support import make_epub
+-from ssmd import lint
++from ssmd import lint, parse_structure
+
+ from ssmdconvert import Book, BookChapter, convert_book
+
+@@ -56,3 +56,29 @@ def test_convert_book_selection_preserves_source_numbers(tmp_path: Path) -> None
+     assert book.chapters[0].source_number == 2
+     assert book.chapters[0].id == "chapter-0002"
+     assert book.chapters[0].title == "Two"
++
++
++def test_convert_book_persists_default_sequence_fallback_mode(tmp_path: Path) -> None:
++    source = tmp_path / "book.epub"
++    make_epub(source)
++
++    book = convert_book(source)
++
++    assert book.metadata["sequence_fallback_mode"] == "spell"
++    for chapter in book.chapters:
++        header = parse_structure(chapter.ssmd, dialect="0.9").header
++        assert header["sequence_fallback_mode"] == "spell"
++
++
++def test_convert_book_persists_explicit_preserve_sequence_fallback_mode(
++    tmp_path: Path,
++) -> None:
++    source = tmp_path / "book.epub"
++    make_epub(source)
++
++    book = convert_book(source, sequence_fallback_mode="preserve")
++
++    assert book.metadata["sequence_fallback_mode"] == "preserve"
++    for chapter in book.chapters:
++        header = parse_structure(chapter.ssmd, dialect="0.9").header
++        assert header["sequence_fallback_mode"] == "preserve"
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 7c4a5da..289bd6e 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -6,6 +6,7 @@ from typing import Any
+
+ from click import unstyle
+ from epub_support import make_epub
++from ssmd import parse_structure
+ from typer.testing import CliRunner
+
+ from ssmdconvert import cli as cli_module
+@@ -47,10 +48,15 @@ def test_enrichment_is_not_a_cli_command() -> None:
+ def test_real_command_groups_and_subcommand_help() -> None:
+     expected_commands = {
+         ("--help",): ("convert", "inspect", "book"),
+-        ("convert", "--help"): ("--force", "--output"),
++        ("convert", "--help"): ("--force", "--output", "--sequence-fallback-mode"),
+         ("book", "--help"): ("inspect", "convert", "validate"),
+         ("book", "inspect", "--help"): ("--json",),
+-        ("book", "convert", "--help"): ("--chapters", "--format", "--force"),
++        ("book", "convert", "--help"): (
++            "--chapters",
++            "--format",
++            "--force",
++            "--sequence-fallback-mode",
++        ),
+         ("book", "validate", "--help"): ("--json",),
+     }
+     for args, expected in expected_commands.items():
+@@ -160,3 +166,91 @@ def test_book_convert_rejects_ambiguous_output_and_same_input(tmp_path: Path) ->
+     )
+     assert same_path.exit_code == 1
+     assert "must not be the input file" in same_path.output
++
++
++def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
++    tmp_path: Path,
++) -> None:
++    source = tmp_path / "source.txt"
++    source.write_text("Hello.", encoding="utf-8")
++
++    default_output = tmp_path / "default.ssmd"
++    default = runner.invoke(app, ["convert", str(source), "--output", str(default_output)])
++    assert default.exit_code == 0, default.output
++    assert (
++        parse_structure(default_output.read_text(encoding="utf-8"), dialect="0.9").header[
++            "sequence_fallback_mode"
++        ]
++        == "spell"
++    )
++
++    preserve_output = tmp_path / "preserve.ssmd"
++    preserve = runner.invoke(
++        app,
++        [
++            "convert",
++            str(source),
++            "--output",
++            str(preserve_output),
++            "--sequence-fallback-mode",
++            "preserve",
++        ],
++    )
++    assert preserve.exit_code == 0, preserve.output
++    assert (
++        parse_structure(preserve_output.read_text(encoding="utf-8"), dialect="0.9").header[
++            "sequence_fallback_mode"
++        ]
++        == "preserve"
++    )
++
++    invalid = runner.invoke(
++        app,
++        [
++            "convert",
++            str(source),
++            "--sequence-fallback-mode",
++            "invalid",
++        ],
++    )
++    assert invalid.exit_code == 2
++    assert "sequence-fallback-mode" in invalid.output
++
++    book_source = tmp_path / "book.epub"
++    make_epub(book_source)
++    book_default_path = tmp_path / "default.ssmdbook"
++    book_default = runner.invoke(
++        app,
++        ["book", "convert", str(book_source), "--output", str(book_default_path)],
++    )
++    assert book_default.exit_code == 0, book_default.output
++    assert load_book_bundle(book_default_path).metadata["sequence_fallback_mode"] == "spell"
++
++    book_preserve_path = tmp_path / "preserve.ssmdbook"
++    book_preserve = runner.invoke(
++        app,
++        [
++            "book",
++            "convert",
++            str(book_source),
++            "--output",
++            str(book_preserve_path),
++            "--sequence-fallback-mode",
++            "preserve",
++        ],
++    )
++    assert book_preserve.exit_code == 0, book_preserve.output
++    assert load_book_bundle(book_preserve_path).metadata["sequence_fallback_mode"] == "preserve"
++
++    invalid_book = runner.invoke(
++        app,
++        [
++            "book",
++            "convert",
++            str(book_source),
++            "--sequence-fallback-mode",
++            "invalid",
++        ],
++    )
++    assert invalid_book.exit_code == 2
++    assert "sequence-fallback-mode" in invalid_book.output
+diff --git a/tests/test_converter_api.py b/tests/test_converter_api.py
+index b3bfc42..e0bd9e5 100644
+--- a/tests/test_converter_api.py
++++ b/tests/test_converter_api.py
+@@ -1,6 +1,7 @@
+ from pathlib import Path
+
+ import pytest
++from ssmd import parse_structure
+
+ from ssmdconvert import Converter, convert
+ from ssmdconvert.errors import UnsupportedInputError
+@@ -17,3 +18,49 @@ def test_unsupported_suffix_is_clear(tmp_path: Path) -> None:
+     source.write_text("Hello", encoding="utf-8")
+     with pytest.raises(UnsupportedInputError):
+         Converter().convert(source)
++
++
++def test_convert_persists_default_sequence_fallback_mode(tmp_path: Path) -> None:
++    source = tmp_path / "a.txt"
++    source.write_text("in-system", encoding="utf-8")
++
++    result = convert(source)
++
++    structure = parse_structure(result.ssmd, dialect="0.9")
++    assert structure.header["sequence_fallback_mode"] == "spell"
++    assert result.document.metadata["sequence_fallback_mode"] == "spell"
++
++
++def test_convert_persists_explicit_preserve_sequence_fallback_mode(tmp_path: Path) -> None:
++    source = tmp_path / "a.txt"
++    source.write_text("in-system", encoding="utf-8")
++
++    result = convert(source, sequence_fallback_mode="preserve")
++
++    assert (
++        parse_structure(result.ssmd, dialect="0.9").header["sequence_fallback_mode"] == "preserve"
++    )
++
++
++def test_convert_rejects_invalid_sequence_fallback_mode(tmp_path: Path) -> None:
++    source = tmp_path / "a.txt"
++    source.write_text("in-system", encoding="utf-8")
++
++    with pytest.raises(ValueError, match="sequence_fallback_mode"):
++        convert(source, sequence_fallback_mode="invalid")  # type: ignore[arg-type]
++
++
++def test_convert_overrides_source_sequence_fallback_metadata(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    source = tmp_path / "a.txt"
++    source.write_text("in-system", encoding="utf-8")
++    converter = Converter()
++    document = converter.load(source)
++    document.metadata["sequence_fallback_mode"] = "preserve"
++    monkeypatch.setattr(converter, "load", lambda _source: document)
++
++    result = converter.convert(source)
++
++    assert result.document.metadata["sequence_fallback_mode"] == "spell"
++    assert parse_structure(result.ssmd, dialect="0.9").header["sequence_fallback_mode"] == "spell"
+diff --git a/tests/test_markdown_html.py b/tests/test_markdown_html.py
+index 3316505..668ebbe 100644
+--- a/tests/test_markdown_html.py
++++ b/tests/test_markdown_html.py
+@@ -11,13 +11,12 @@ def test_markdown_becomes_safe_speech_sections(tmp_path: Path) -> None:
+     assert "Hello world." in result.ssmd
+
+
+-
+ def test_markdown_semantics_are_safe_for_ssmd_controls() -> None:
+     source = (
+         "# Intro\n\nThis is *important*, **critical**, and ~~old~~.\n\n"
+         "Read the [guide](https://example.invalid). ![diagram](image.png) and `code`.\n\n"
+         "- [x] done\n- [ ] later\n\n"
+-        "```text\n[x]{rate=\"fast\"}\n...500ms\n@chapter\n```\n\n"
++        '```text\n[x]{rate="fast"}\n...500ms\n@chapter\n```\n\n'
+         "A claim.[^1]\n\n[^1]: Supporting detail."
+     )
+     result = convert_content(source, input_format="markdown", source_name="notes.md")
+@@ -44,7 +43,6 @@ def test_html_converts_headings_paragraphs_and_emphasis(tmp_path: Path) -> None:
+     assert "Hello *there*." in result.ssmd
+
+
+-
+ def test_in_memory_conversions_match_path_adapters(tmp_path: Path) -> None:
+     inputs = (
+         ("notes.txt", "text", "Chapter One\n\nPlain text."),
+@@ -61,9 +59,7 @@ def test_in_memory_conversions_match_path_adapters(tmp_path: Path) -> None:
+         source = tmp_path / source_name
+         source.write_text(content, encoding="utf-8")
+         from_path = converter.convert(source)
+-        from_content = convert_content(
+-            content, input_format=input_format, source_name=source_name
+-        )
++        from_content = convert_content(content, input_format=input_format, source_name=source_name)
+
+         assert from_content.ssmd == from_path.ssmd
+         assert from_content.document.sections == from_path.document.sections
+diff --git a/tests/test_sequence_fallback_policy.py b/tests/test_sequence_fallback_policy.py
+new file mode 100644
+index 0000000..8a746c9
+--- /dev/null
++++ b/tests/test_sequence_fallback_policy.py
+@@ -0,0 +1,30 @@
++import pytest
++
++from ssmdconvert.policy import (
++    DEFAULT_SEQUENCE_FALLBACK_MODE,
++    validate_sequence_fallback_mode,
++)
++
++
++@pytest.mark.parametrize("mode", ["spell", "preserve"])
++def test_validate_sequence_fallback_mode_accepts_supported_values(mode: str) -> None:
++    assert validate_sequence_fallback_mode(mode) == mode
++
++
++@pytest.mark.parametrize("mode", ["invalid", None, [], 1])
++def test_validate_sequence_fallback_mode_rejects_unsupported_values(mode: object) -> None:
++    with pytest.raises(ValueError, match="sequence_fallback_mode"):
++        validate_sequence_fallback_mode(mode)
++
++
++def test_speech_preparation_uses_the_shared_default_and_validator() -> None:
++    pytest.importorskip("spokenform")
++    from ssmdconvert.speech.models import SpeechPreparationOptions
++
++    assert (
++        SpeechPreparationOptions().sequence_fallback_mode
++        == (DEFAULT_SEQUENCE_FALLBACK_MODE)
++        == "spell"
++    )
++    with pytest.raises(ValueError, match="sequence_fallback_mode"):
++        SpeechPreparationOptions(sequence_fallback_mode="invalid")  # type: ignore[arg-type]

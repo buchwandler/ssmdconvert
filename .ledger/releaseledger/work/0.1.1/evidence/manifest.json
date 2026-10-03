@@ -1,0 +1,81 @@
+{
+  "candidate_count": 3,
+  "candidates": [
+    {
+      "additions": 14,
+      "deletions": 5,
+      "patch_file": "d9687e4.patch",
+      "patch_sha256": "5ea9f8a3354a8aab640dee7343bbcbb5d63d686fa4defee4869a449f2fb6639f",
+      "paths": [
+        ".ledger/releaseledger/data/ledgers/main/events/events.jsonl",
+        ".ledger/releaseledger/data/ledgers/main/releases/0.1.0/release.md",
+        "README.md",
+        "docs/changelog.md",
+        "docs/index.md"
+      ],
+      "sha": "d9687e445a541d1decfe9120d74805d7cdd89057",
+      "short_sha": "d9687e4",
+      "source_ref": "git:d9687e445a541d1decfe9120d74805d7cdd89057"
+    },
+    {
+      "additions": 446,
+      "deletions": 27,
+      "patch_file": "4b19351.patch",
+      "patch_sha256": "88342d6f0d6e65473d350fbc8e7c3ff464906e4355fb6220422a1db553880d41",
+      "paths": [
+        "README.md",
+        "pyproject.toml",
+        "ssmdconvert/__init__.py",
+        "ssmdconvert/adapters/__init__.py",
+        "ssmdconvert/adapters/base.py",
+        "ssmdconvert/adapters/html.py",
+        "ssmdconvert/adapters/markdown.py",
+        "ssmdconvert/adapters/markdown_speech.py",
+        "ssmdconvert/adapters/text.py",
+        "ssmdconvert/converter.py",
+        "tests/test_markdown_html.py",
+        "tests/typecheck/public_api.py"
+      ],
+      "sha": "4b19351704da02578b56ce86c1ce7935be442821",
+      "short_sha": "4b19351",
+      "source_ref": "git:4b19351704da02578b56ce86c1ce7935be442821"
+    },
+    {
+      "additions": 382,
+      "deletions": 25,
+      "patch_file": "b1f342f.patch",
+      "patch_sha256": "18952a9c65be957df6a541d62a39772d0cc238d58fbd0113f6251d9570b4572c",
+      "paths": [
+        "README.md",
+        "docs/api.md",
+        "docs/books.md",
+        "docs/bundle-format.md",
+        "docs/usage.md",
+        "ssmdconvert/adapters/markdown.py",
+        "ssmdconvert/books.py",
+        "ssmdconvert/cli.py",
+        "ssmdconvert/converter.py",
+        "ssmdconvert/policy.py",
+        "ssmdconvert/render.py",
+        "ssmdconvert/speech/models.py",
+        "tests/test_book_bundle.py",
+        "tests/test_book_conversion.py",
+        "tests/test_cli.py",
+        "tests/test_converter_api.py",
+        "tests/test_markdown_html.py",
+        "tests/test_sequence_fallback_policy.py"
+      ],
+      "sha": "b1f342fbb57e2c0a04fceee24b32d9adf503dbcf",
+      "short_sha": "b1f342f",
+      "source_ref": "git:b1f342fbb57e2c0a04fceee24b32d9adf503dbcf"
+    }
+  ],
+  "git_base_ref": "3b6cdd1d68cf4fbac60d9662e465c0608d469d94",
+  "git_base_sha": "3b6cdd1d68cf4fbac60d9662e465c0608d469d94",
+  "git_head_ref": "b1f342fbb57e2c0a04fceee24b32d9adf503dbcf",
+  "git_head_sha": "b1f342fbb57e2c0a04fceee24b32d9adf503dbcf",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.1.1",
+  "schema_version": 1
+}

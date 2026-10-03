@@ -1,0 +1,93 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.1.1
+git_base_ref: v0.1.0
+git_base_sha: 3b6cdd1d68cf4fbac60d9662e465c0608d469d94
+git_head_ref: HEAD
+git_head_sha: b1f342fbb57e2c0a04fceee24b32d9adf503dbcf
+git_range: 3b6cdd1d68cf4fbac60d9662e465c0608d469d94..b1f342fbb57e2c0a04fceee24b32d9adf503dbcf
+commit_count: 3
+rows:
+  - sha: d9687e445a541d1decfe9120d74805d7cdd89057
+    source_ref: git:d9687e445a541d1decfe9120d74805d7cdd89057
+    short_sha: d9687e4
+    changed_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.1.0/release.md
+      - README.md
+      - docs/changelog.md
+      - docs/index.md
+    stats:
+      files_changed: 5
+      insertions: 14
+      deletions: 5
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "doc: changelog"
+  - sha: 4b19351704da02578b56ce86c1ce7935be442821
+    source_ref: git:4b19351704da02578b56ce86c1ce7935be442821
+    short_sha: 4b19351
+    changed_paths:
+      - README.md
+      - pyproject.toml
+      - ssmdconvert/__init__.py
+      - ssmdconvert/adapters/__init__.py
+      - ssmdconvert/adapters/base.py
+      - ssmdconvert/adapters/html.py
+      - ssmdconvert/adapters/markdown.py
+      - ssmdconvert/adapters/markdown_speech.py
+      - ssmdconvert/adapters/text.py
+      - ssmdconvert/converter.py
+      - tests/test_markdown_html.py
+      - tests/typecheck/public_api.py
+    stats:
+      files_changed: 12
+      insertions: 446
+      deletions: 27
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add option to convert markdown"
+  - sha: b1f342fbb57e2c0a04fceee24b32d9adf503dbcf
+    source_ref: git:b1f342fbb57e2c0a04fceee24b32d9adf503dbcf
+    short_sha: b1f342f
+    changed_paths:
+      - README.md
+      - docs/api.md
+      - docs/books.md
+      - docs/bundle-format.md
+      - docs/usage.md
+      - ssmdconvert/adapters/markdown.py
+      - ssmdconvert/books.py
+      - ssmdconvert/cli.py
+      - ssmdconvert/converter.py
+      - ssmdconvert/policy.py
+      - ssmdconvert/render.py
+      - ssmdconvert/speech/models.py
+      - tests/test_book_bundle.py
+      - tests/test_book_conversion.py
+      - tests/test_cli.py
+      - tests/test_converter_api.py
+      - tests/test_markdown_html.py
+      - tests/test_sequence_fallback_policy.py
+    stats:
+      files_changed: 18
+      insertions: 382
+      deletions: 25
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add markdown support and set fallback mode for spokenform"
