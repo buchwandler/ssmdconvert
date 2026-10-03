@@ -27,8 +27,7 @@ class AdaptiveHelpFormatter(_BaseHelpFormatter):  # type: ignore[valid-type,misc
         # installed, including when plain Click help formatting is selected.
         # Undo that escape so the annotation remains readable in either layout.
         rows = [
-            (term, description.replace(r"\[default:", "[default:"))
-            for term, description in rows
+            (term, description.replace(r"\[default:", "[default:")) for term, description in rows
         ]
 
         if self.width >= NARROW_HELP_WIDTH:
