@@ -40,7 +40,7 @@ def parse_chapter_selection(
                 raise ChapterSelectionError("chapter numbers must be positive")
             if first > last:
                 raise ChapterSelectionError(f"chapter range is reversed: {token}")
-            requested = range(first, last + 1)
+            requested: Collection[int] = range(first, last + 1)
         elif token.isdecimal():
             number = int(token)
             if number < 1:

@@ -13,11 +13,13 @@ def make_epub(
     duplicate_visible_titles: bool = False,
     include_empty_spine_item: bool = False,
     chapter_one_suffix: str = "",
+    language: str | None = "en",
 ) -> None:
     book = epub.EpubBook()
     book.set_identifier("demo-id")
     book.set_title("Demo Book")
-    book.set_language("en")
+    if language is not None:
+        book.set_language(language)
     book.add_author("A. Author")
     book.add_metadata("DC", "publisher", "Demo Press")
 

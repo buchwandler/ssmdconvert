@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 SequenceFallbackMode = Literal["preserve", "spell"]
-DEFAULT_SEQUENCE_FALLBACK_MODE: SequenceFallbackMode = "spell"
+DEFAULT_SEQUENCE_FALLBACK_MODE: SequenceFallbackMode = "preserve"
 
 
 def validate_sequence_fallback_mode(value: object) -> SequenceFallbackMode:

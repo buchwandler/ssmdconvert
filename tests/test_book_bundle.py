@@ -449,15 +449,18 @@ def test_bundle_roundtrip_preserves_sequence_fallback_mode(tmp_path: Path, forma
         assert manifest["metadata"]["sequence_fallback_mode"] == "preserve"
 
 
-def test_bundle_without_sequence_fallback_metadata_remains_valid(tmp_path: Path) -> None:
+def test_legacy_bundle_without_policy_and_with_unknown_metadata_remains_valid(
+    tmp_path: Path,
+) -> None:
     _source, book = _book(tmp_path)
     bundle = write_book_bundle(book, tmp_path / "old.ssmdbook", format="directory")
     manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
     del manifest["metadata"]["sequence_fallback_mode"]
+    manifest["metadata"]["third_party_metadata"] = {"vendor": "sample", "enabled": True}
     for chapter in manifest["chapters"]:
         path = bundle / chapter["path"]
         content = path.read_text(encoding="utf-8")
-        legacy_content = content.replace("sequence_fallback_mode: spell\n", "")
+        legacy_content = content.replace("sequence_fallback_mode: preserve\n", "")
         assert legacy_content != content
         path.write_text(legacy_content, encoding="utf-8")
         chapter["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -466,5 +469,6 @@ def test_bundle_without_sequence_fallback_metadata_remains_valid(tmp_path: Path)
     loaded = load_book_bundle(bundle)
 
     assert "sequence_fallback_mode" not in loaded.metadata
+    assert loaded.metadata["third_party_metadata"] == {"vendor": "sample", "enabled": True}
     for chapter in loaded.chapters:
         assert "sequence_fallback_mode" not in parse_structure(chapter.ssmd, dialect="0.9").header

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from click import unstyle
 from epub_support import make_epub
+from ssmd import parse_structure
 from typer.testing import CliRunner
 
 from ssmdconvert import load_book_bundle
@@ -91,3 +92,114 @@ def test_book_convert_rejects_invalid_selection_and_removed_speech_flags(tmp_pat
     result = runner.invoke(app, ["book", "convert", str(source), "--speech", "annotate"])
     assert result.exit_code == 2
     assert "No such option: --speech" in unstyle(result.output)
+
+
+
+def test_book_convert_language_and_metadata_file_overrides(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    make_epub(source)
+    metadata_file = tmp_path / "metadata.yaml"
+    metadata_file.write_text(
+        "title: File title\nlanguage: fr-FR\nvoice_defaults: {}\n", encoding="utf-8"
+    )
+    bundle_path = tmp_path / "book.ssmdbook.zip"
+
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "convert",
+            str(source),
+            "--metadata-file",
+            str(metadata_file),
+            "-l",
+            "de-DE",
+            "--output",
+            str(bundle_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    book = load_book_bundle(bundle_path)
+    assert book.metadata["title"] == "File title"
+    assert book.metadata["language"] == "de-DE"
+    assert book.metadata["sequence_fallback_mode"] == "preserve"
+    assert book.metadata["voice_defaults"] == {}
+    for chapter in book.chapters:
+        header = parse_structure(chapter.ssmd, dialect="0.9").header
+        assert header["language"] == "de-DE"
+        assert header["sequence_fallback_mode"] == "preserve"
+        assert header["voice_defaults"] == {}
+
+
+
+def test_book_metadata_displays_directory_and_zip_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "book.epub"
+    make_epub(source, language=None)
+    metadata_file = tmp_path / "metadata.yaml"
+    metadata_file.write_text(
+        """\
+        title: Platform Decay
+        authors:
+          - Martha Wells
+        voice_defaults:
+          narrator:
+            rate: slow
+        """,
+        encoding="utf-8",
+    )
+
+    for bundle_name in ("book.ssmdbook", "book.ssmdbook.zip"):
+        bundle = tmp_path / bundle_name
+        converted = runner.invoke(
+            app,
+            [
+                "book",
+                "convert",
+                str(source),
+                "--metadata-file",
+                str(metadata_file),
+                "--output",
+                str(bundle),
+            ],
+        )
+        assert converted.exit_code == 0, converted.output
+
+        human = runner.invoke(app, ["book", "metadata", str(bundle)])
+        assert human.exit_code == 0, human.output
+        assert "Title: Platform Decay" in human.output
+        assert "Authors: Martha Wells" in human.output
+        assert "Language: not set" in human.output
+        assert "Sequence fallback mode: preserve" in human.output
+        assert '"narrator"' in human.output
+        assert '"rate": "slow"' in human.output
+
+        stored = load_book_bundle(bundle)
+        json_result = runner.invoke(app, ["book", "metadata", str(bundle), "--json"])
+        assert json_result.exit_code == 0, json_result.output
+        expected = {"metadata": dict(stored.metadata)}
+        assert json.loads(json_result.output) == expected
+        assert json_result.output == (
+            json.dumps(
+                expected,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n"
+        )
+        assert "language" not in expected["metadata"]
+
+
+def test_book_metadata_reports_missing_and_invalid_bundles(tmp_path: Path) -> None:
+    missing = runner.invoke(app, ["book", "metadata", str(tmp_path / "missing.ssmdbook")])
+    assert missing.exit_code != 0
+    assert "does not exist" in unstyle(missing.output)
+
+    invalid = tmp_path / "invalid.ssmdbook"
+    invalid.mkdir()
+    result = runner.invoke(app, ["book", "metadata", str(invalid)])
+    assert result.exit_code == 1
+    assert "Error:" in result.output
+    assert "manifest.json" in result.output

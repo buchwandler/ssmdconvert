@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from click import unstyle
 from epub_support import make_epub
 from ssmd import parse_structure
@@ -48,15 +49,24 @@ def test_enrichment_is_not_a_cli_command() -> None:
 def test_real_command_groups_and_subcommand_help() -> None:
     expected_commands = {
         ("--help",): ("convert", "inspect", "book"),
-        ("convert", "--help"): ("--force", "--output", "--sequence-fallback-mode"),
-        ("book", "--help"): ("inspect", "convert", "validate"),
+        ("convert", "--help"): (
+            "--force",
+            "-l, --language",
+            "--metadata-file",
+            "--output",
+            "--sequence-fallback-mode",
+        ),
+        ("book", "--help"): ("inspect", "convert", "validate", "metadata"),
         ("book", "inspect", "--help"): ("--json",),
         ("book", "convert", "--help"): (
             "--chapters",
             "--format",
             "--force",
+            "--language",
+            "--metadata-file",
             "--sequence-fallback-mode",
         ),
+        ("book", "metadata", "--help"): ("--json",),
         ("book", "validate", "--help"): ("--json",),
     }
     for args, expected in expected_commands.items():
@@ -181,9 +191,28 @@ def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
         parse_structure(default_output.read_text(encoding="utf-8"), dialect="0.9").header[
             "sequence_fallback_mode"
         ]
-        == "spell"
+        == "preserve"
     )
 
+    spell_output = tmp_path / "spell.ssmd"
+    spell = runner.invoke(
+        app,
+        [
+            "convert",
+            str(source),
+            "--output",
+            str(spell_output),
+            "--sequence-fallback-mode",
+            "spell",
+        ],
+    )
+    assert spell.exit_code == 0, spell.output
+    assert (
+        parse_structure(spell_output.read_text(encoding="utf-8"), dialect="0.9").header[
+            "sequence_fallback_mode"
+        ]
+        == "spell"
+    )
     preserve_output = tmp_path / "preserve.ssmd"
     preserve = runner.invoke(
         app,
@@ -224,8 +253,23 @@ def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
         ["book", "convert", str(book_source), "--output", str(book_default_path)],
     )
     assert book_default.exit_code == 0, book_default.output
-    assert load_book_bundle(book_default_path).metadata["sequence_fallback_mode"] == "spell"
+    assert load_book_bundle(book_default_path).metadata["sequence_fallback_mode"] == "preserve"
 
+    book_spell_path = tmp_path / "spell.ssmdbook"
+    book_spell = runner.invoke(
+        app,
+        [
+            "book",
+            "convert",
+            str(book_source),
+            "--output",
+            str(book_spell_path),
+            "--sequence-fallback-mode",
+            "spell",
+        ],
+    )
+    assert book_spell.exit_code == 0, book_spell.output
+    assert load_book_bundle(book_spell_path).metadata["sequence_fallback_mode"] == "spell"
     book_preserve_path = tmp_path / "preserve.ssmdbook"
     book_preserve = runner.invoke(
         app,
@@ -254,3 +298,112 @@ def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
     )
     assert invalid_book.exit_code == 2
     assert "sequence-fallback-mode" in unstyle(invalid_book.output)
+
+
+@pytest.mark.parametrize("terminal_width", [40, 48, 60])
+def test_cli_help_uses_stacked_layout_on_narrow_terminals(terminal_width: int) -> None:
+    help_commands = [
+        ["--help"],
+        ["convert", "--help"],
+        ["book", "--help"],
+        ["book", "convert", "--help"],
+        ["book", "metadata", "--help"],
+    ]
+    for args in help_commands:
+        result = runner.invoke(app, args, terminal_width=terminal_width)
+        assert result.exit_code == 0, result.output
+
+    root_help = runner.invoke(app, ["--help"], terminal_width=terminal_width)
+    root_lines = root_help.output.splitlines()
+    convert_index = root_lines.index("  convert")
+    assert root_lines[convert_index + 1].startswith("      ")
+    assert root_lines[convert_index + 1].strip()
+
+    book_help = runner.invoke(app, ["book", "--help"], terminal_width=terminal_width)
+    book_lines = book_help.output.splitlines()
+    metadata_command_index = book_lines.index("  metadata")
+    assert book_lines[metadata_command_index + 1].startswith("      ")
+    assert book_lines[metadata_command_index + 1].strip()
+
+    for args in (["convert", "--help"], ["book", "convert", "--help"]):
+        result = runner.invoke(app, args, terminal_width=terminal_width)
+        lines = result.output.splitlines()
+        option_index = next(
+            index
+            for index, line in enumerate(lines)
+            if line.strip().startswith("--sequence-fallback-mode ")
+        )
+        assert "[default:" not in lines[option_index]
+        assert lines[option_index + 1].lstrip().startswith("[default:")
+        assert len(lines[option_index + 1]) - len(lines[option_index + 1].lstrip()) >= 6
+        metadata_index = next(
+            index
+            for index, line in enumerate(lines)
+            if line.strip().startswith("--metadata-file ")
+        )
+        assert "YAML file with" not in lines[metadata_index]
+        assert lines[metadata_index + 1].lstrip().startswith("YAML file with")
+        assert len(lines[metadata_index + 1]) - len(lines[metadata_index + 1].lstrip()) >= 6
+
+
+def test_cli_help_keeps_compact_layout_on_wide_terminals() -> None:
+    result = runner.invoke(app, ["--help"], terminal_width=100)
+    assert result.exit_code == 0, result.output
+    assert any(
+        line.startswith("  convert  Convert a supported input")
+        for line in result.output.splitlines()
+    )
+
+
+
+def test_convert_metadata_file_merges_with_cli_precedence(tmp_path: Path) -> None:
+    source = tmp_path / "source.txt"
+    source.write_text("Hello.", encoding="utf-8")
+    metadata_file = tmp_path / "metadata.yaml"
+    metadata_file.write_text(
+        "title: File title\nlanguage: fr-FR\nsequence_fallback_mode: spell\nvoice_defaults: {}\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "result.ssmd"
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            str(source),
+            "--metadata-file",
+            str(metadata_file),
+            "--title",
+            "CLI title",
+            "--author",
+            "CLI author",
+            "-l",
+            "de-DE",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    header = parse_structure(output.read_text(encoding="utf-8"), dialect="0.9").header
+    assert header["title"] == "CLI title"
+    assert header["author"] == "CLI author"
+    assert header["language"] == "de-DE"
+    assert header["sequence_fallback_mode"] == "preserve"
+    assert header["voice_defaults"] == {}
+
+
+
+def test_convert_rejects_invalid_ssmd_metadata_shape_from_file(tmp_path: Path) -> None:
+    source = tmp_path / "source.txt"
+    source.write_text("Hello.", encoding="utf-8")
+    metadata_file = tmp_path / "metadata.yaml"
+    metadata_file.write_text("voice_defaults: invalid\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["convert", str(source), "--metadata-file", str(metadata_file)],
+    )
+
+    assert result.exit_code == 1
+    assert "voice_defaults" in result.output

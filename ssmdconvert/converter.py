@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from .adapters import (
     ContentAdapter,
@@ -11,6 +11,7 @@ from .adapters import (
     default_content_adapters,
 )
 from .errors import UnsupportedInputError
+from .metadata import merge_document_metadata
 from .models import ConversionResult, Document
 from .policy import (
     DEFAULT_SEQUENCE_FALLBACK_MODE,
@@ -55,14 +56,20 @@ class Converter:
         author: str | None = None,
         language: str | None,
         sequence_fallback_mode: SequenceFallbackMode,
+        metadata_overrides: Mapping[str, Any] | None,
     ) -> ConversionResult:
+        cli_overrides: dict[str, Any] = {}
         if title is not None:
-            document.metadata["title"] = title
+            cli_overrides["title"] = title
         if author is not None:
-            document.metadata["author"] = author
-        if language is not None:
-            document.metadata["language"] = language
-        document.metadata["sequence_fallback_mode"] = sequence_fallback_mode
+            cli_overrides["author"] = author
+        document.metadata = merge_document_metadata(
+            document.metadata,
+            metadata_overrides=metadata_overrides,
+            cli_overrides=cli_overrides,
+            language=language,
+            sequence_fallback_mode=sequence_fallback_mode,
+        )
         return ConversionResult(document=document, ssmd=render_document(document))
 
     def convert(
@@ -72,6 +79,7 @@ class Converter:
         title: str | None = None,
         author: str | None = None,
         language: str | None = None,
+        metadata_overrides: Mapping[str, Any] | None = None,
         sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
     ) -> ConversionResult:
         """Convert a source into one combined SSMD document."""
@@ -82,6 +90,7 @@ class Converter:
             title=title,
             author=author,
             language=language,
+            metadata_overrides=metadata_overrides,
             sequence_fallback_mode=mode,
         )
 
@@ -93,6 +102,7 @@ class Converter:
         source_name: str = "<memory>",
         title: str | None = None,
         language: str | None = None,
+        metadata_overrides: Mapping[str, Any] | None = None,
         sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
     ) -> ConversionResult:
         """Convert in-memory text, Markdown, or HTML into one SSMD document."""
@@ -108,6 +118,7 @@ class Converter:
             document,
             title=title,
             language=language,
+            metadata_overrides=metadata_overrides,
             sequence_fallback_mode=mode,
         )
 
@@ -118,6 +129,7 @@ def convert(
     title: str | None = None,
     author: str | None = None,
     language: str | None = None,
+    metadata_overrides: Mapping[str, Any] | None = None,
     sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
 ) -> ConversionResult:
     """Convert a source path with the default adapters."""
@@ -126,6 +138,7 @@ def convert(
         title=title,
         author=author,
         language=language,
+        metadata_overrides=metadata_overrides,
         sequence_fallback_mode=sequence_fallback_mode,
     )
 
@@ -137,6 +150,7 @@ def convert_content(
     source_name: str = "<memory>",
     title: str | None = None,
     language: str | None = None,
+    metadata_overrides: Mapping[str, Any] | None = None,
     sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
 ) -> ConversionResult:
     """Convert in-memory text, Markdown, or HTML with the default adapters."""
@@ -146,5 +160,6 @@ def convert_content(
         source_name=source_name,
         title=title,
         language=language,
+        metadata_overrides=metadata_overrides,
         sequence_fallback_mode=sequence_fallback_mode,
     )

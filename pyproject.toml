@@ -31,6 +31,7 @@ dependencies = [
   "mdit-py-plugins>=0.4,<1.0",
   "typer>=0.20,<1",
   "tomli>=2; python_version < '3.11'",
+  "PyYAML>=6,<7",
 ]
 
 [project.optional-dependencies]

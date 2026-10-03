@@ -11,7 +11,7 @@ import zipfile
 import zlib
 from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, NoReturn
+from typing import Any, Literal, NoReturn, TypeGuard
 
 from .errors import BookBundleError, BookBundleValidationError
 from .models import Book, BookChapter, SourceInfo
@@ -34,7 +34,7 @@ def _invalid(display: str, message: str) -> NoReturn:
     raise BookBundleValidationError(f"{display}: {message}")
 
 
-def _is_integer(value: Any) -> bool:
+def _is_integer(value: Any) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
@@ -108,7 +108,8 @@ def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
     _validate_source_name(source.get("name"), display)
     if not _is_sha256(source.get("sha256")):
         _invalid(display, "source sha256 must be a lowercase SHA256 digest")
-    if not _is_integer(source.get("chapter_count")) or source["chapter_count"] < 0:
+    chapter_count = source.get("chapter_count")
+    if not _is_integer(chapter_count) or chapter_count < 0:
         _invalid(display, "source chapter_count must be a non-negative integer")
 
     chapters = value.get("chapters")
@@ -132,7 +133,7 @@ def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
         source_number = chapter.get("source_number")
         if not _is_integer(source_number) or source_number < 1:
             _invalid(display, f"{label} source_number must be a positive integer")
-        if source_number > source["chapter_count"]:
+        if source_number > chapter_count:
             _invalid(display, f"{label} source_number exceeds source chapter_count")
         if source_number in source_numbers:
             _invalid(display, f"duplicate source_number: {source_number}")

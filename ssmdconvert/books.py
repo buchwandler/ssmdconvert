@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from ._epub import ExtractedChapter, load_epub
 from .chapter_selection import parse_chapter_selection
 from .errors import BookError
+from .metadata import merge_document_metadata
 from .models import Book, BookChapter, BookInspection, BookInspectionChapter, SourceInfo
-from .policy import (
-    DEFAULT_SEQUENCE_FALLBACK_MODE,
-    SequenceFallbackMode,
-    validate_sequence_fallback_mode,
-)
+from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SequenceFallbackMode
 from .render import render_standalone_chapter
 
 
@@ -70,13 +69,18 @@ def convert_book(
     source: str | Path,
     *,
     chapters: str | None = "all",
+    language: str | None = None,
+    metadata_overrides: Mapping[str, Any] | None = None,
     sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
 ) -> Book:
     """Convert selected EPUB chapters to standalone SSMD in source order."""
-    mode = validate_sequence_fallback_mode(sequence_fallback_mode)
     inspection, extracted_chapters = _inspect_epub(source)
-    metadata = dict(inspection.metadata)
-    metadata["sequence_fallback_mode"] = mode
+    metadata = merge_document_metadata(
+        inspection.metadata,
+        metadata_overrides=metadata_overrides,
+        language=language,
+        sequence_fallback_mode=sequence_fallback_mode,
+    )
     source_path = inspection.source.path
     assert source_path is not None
     source_sha256 = _source_sha256(source_path)

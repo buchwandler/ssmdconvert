@@ -49,7 +49,8 @@ def _backend_version() -> str | None:
 
 
 def _annotation_language(annotation: AnnotationSpan) -> str | None:
-    return annotation.attrs.get("lang") or annotation.attrs.get("language")
+    language = annotation.attrs.get("lang") or annotation.attrs.get("language")
+    return language if isinstance(language, str) else None
 
 
 def _run_language(

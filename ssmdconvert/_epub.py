@@ -101,7 +101,14 @@ def load_epub(source: str | Path) -> ExtractedEpub:
         if chapter.source_id is not None
     }
     chapters = tuple(
-        replace(chapter, parent_id=source_ids.get(chapter.source_parent_id))
+        replace(
+            chapter,
+            parent_id=(
+                source_ids.get(chapter.source_parent_id)
+                if chapter.source_parent_id is not None
+                else None
+            ),
+        )
         for chapter in extracted_chapters
     )
     return ExtractedEpub(source=path, metadata=metadata, chapters=chapters)

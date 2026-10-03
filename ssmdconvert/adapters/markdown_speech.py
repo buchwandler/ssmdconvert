@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from html.parser import HTMLParser
-from typing import Any
+from typing import Any, cast
 
 import ssmd
 from markdown_it import MarkdownIt
@@ -264,4 +264,4 @@ def markdown_to_speech(text: str) -> str:
     tokens = parser.parse(source)
     blocks = [_normalise_inline(block) for block in _render_nodes(_build_tree(tokens))]
     projected = "\n\n".join(block for block in blocks if block)
-    return ssmd.escape_ssmd_syntax(projected).strip()
+    return cast(str, ssmd.escape_ssmd_syntax(projected).strip())

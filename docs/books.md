@@ -21,10 +21,20 @@ ssmdconvert book convert novel.epub --chapters 2-20 -o selected.ssmdbook
 
 Selectors use original 1-based source chapter numbers. They address the complete source inventory, even when the output contains only a subset. Selected chapters always remain in source order. Duplicate numbers do not duplicate chapters. Missing chapters, zero or negative numbers, reversed ranges, and malformed tokens raise `ChapterSelectionError`.
 
-Book conversion also accepts `--sequence-fallback-mode spell|preserve`. The default is `spell`; the chosen value is written to the book manifest and mirrored in every chapter so extracted chapters remain self-contained.
+New book conversions default to `sequence_fallback_mode=preserve`; `spell` remains an explicit option. The selected policy is written to the book manifest and mirrored into each chapter so extracted chapters remain self-contained. Existing bundles may omit the field, and this writer default does not redefine how consumers handle that absence.
 
 ```bash
-ssmdconvert book convert novel.epub --sequence-fallback-mode preserve -o novel.ssmdbook
+ssmdconvert book convert novel.epub -l de-DE --metadata-file book-metadata.yaml -o novel.ssmdbook
+```
+
+
+`-l/--language` overrides the EPUB language. Without an override, the EPUB value is retained; if the source has no language, conversion leaves it absent. The effective language is stored in the bundle metadata and every chapter. `--metadata-file` accepts UTF-8 YAML with supported bibliographic and portable SSMD fields. Source metadata is overridden by the file, explicit CLI flags override the file, and the effective sequence policy takes final precedence.
+
+Inspect the validated stored metadata in either bundle format:
+
+```bash
+ssmdconvert book metadata novel.ssmdbook
+ssmdconvert book metadata novel.ssmdbook.zip --json
 ```
 
 ## Write and validate bundles
@@ -59,5 +69,8 @@ validate_book_bundle("selected.ssmdbook")
 ```
 
 `Book.source_sha256` is captured during conversion. Bundle writing persists that captured hash and does not reread the source file. After loading a bundle, source provenance remains available in `Book.source`, but its local `path` is `None`.
+
+
+`convert_book()` also accepts `language` and `metadata_overrides`. The explicit language wins over source and metadata-file values. The returned `Book.metadata` includes the effective language and portable metadata, and every chapter copies each supported portable SSMD key before SSMD 0.9 validation.
 
 See [Bundle format](bundle-format.md) for manifest fields, canonical paths, integrity checks, and resource limits.

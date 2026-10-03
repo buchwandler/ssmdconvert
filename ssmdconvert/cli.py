@@ -3,22 +3,37 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import typer
 
 from . import __version__
 from .books import convert_book, inspect_book
-from .bundle import validate_book_bundle, write_book_bundle
+from .bundle import load_book_bundle, validate_book_bundle, write_book_bundle
+from .cli_help import AdaptiveTyper, AdaptiveTyperGroup
 from .converter import Converter
 from .errors import SSMDConvertError
+from .metadata import load_metadata_file
+from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE
 
-app = typer.Typer(help="Convert documents and books into SSMD.", no_args_is_help=True)
-book_app = typer.Typer(help="Inspect and convert EPUB books.", no_args_is_help=True)
+app = AdaptiveTyper(
+    cls=AdaptiveTyperGroup,
+    add_completion=False,
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    help="Convert documents and books into SSMD.",
+)
+book_app = AdaptiveTyper(
+    cls=AdaptiveTyperGroup,
+    add_completion=False,
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    help="Inspect and convert EPUB books.",
+)
 app.add_typer(book_app, name="book")
 
 
@@ -27,13 +42,21 @@ class SequenceFallbackModeOption(str, Enum):
     preserve = "preserve"
 
 
+_SEQUENCE_FALLBACK_OPTIONS = {
+    option.value: option for option in SequenceFallbackModeOption
+}
+DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION = _SEQUENCE_FALLBACK_OPTIONS[
+    DEFAULT_SEQUENCE_FALLBACK_MODE
+]
+
+
 def _version(value: bool) -> None:
     if value:
         typer.echo(__version__)
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback()  # type: ignore[untyped-decorator]
 def main(
     version: Annotated[
         bool | None,
@@ -132,17 +155,21 @@ def _book_output_format(
     )
 
 
-@app.command()
+@app.command()  # type: ignore[untyped-decorator]
 def convert(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    metadata_file: Annotated[
+        Path | None,
+        typer.Option("--metadata-file", help="YAML file with structured metadata overrides."),
+    ] = None,
     title: Annotated[str | None, typer.Option("--title")] = None,
     author: Annotated[str | None, typer.Option("--author")] = None,
-    language: Annotated[str | None, typer.Option("--language")] = None,
+    language: Annotated[str | None, typer.Option("-l", "--language")] = None,
     sequence_fallback_mode: Annotated[
         SequenceFallbackModeOption,
         typer.Option("--sequence-fallback-mode"),
-    ] = SequenceFallbackModeOption.spell,
+    ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
     force: Annotated[
         bool, typer.Option("--force", help="Replace an existing output file.")
     ] = False,
@@ -155,6 +182,9 @@ def convert(
             title=title,
             author=author,
             language=language,
+            metadata_overrides=(
+                load_metadata_file(metadata_file) if metadata_file is not None else None
+            ),
             sequence_fallback_mode=sequence_fallback_mode.value,
         )
         destination = output or source.with_suffix(".ssmd")
@@ -164,7 +194,7 @@ def convert(
     _run_with_domain_errors(run)
 
 
-@app.command()
+@app.command()  # type: ignore[untyped-decorator]
 def inspect(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
     json_output: Annotated[bool, typer.Option("--json")] = False,
@@ -202,7 +232,7 @@ def inspect(
     _run_with_domain_errors(run)
 
 
-@book_app.command("inspect")
+@book_app.command("inspect")  # type: ignore[untyped-decorator]
 def book_inspect(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
     json_output: Annotated[bool, typer.Option("--json")] = False,
@@ -234,15 +264,90 @@ def book_inspect(
     _run_with_domain_errors(run)
 
 
-@book_app.command("convert")
+_BOOK_METADATA_FIELDS = (
+    ("title", "Title"),
+    ("authors", "Authors"),
+    ("language", "Language"),
+    ("sequence_fallback_mode", "Sequence fallback mode"),
+    ("voice_bindings", "Voice bindings"),
+    ("voice_defaults", "Voice defaults"),
+    ("pause_defaults", "Pause defaults"),
+    ("prosody_transitions", "Prosody transitions"),
+    ("language_detection", "Language detection"),
+    ("requires", "Requires"),
+    ("publisher", "Publisher"),
+    ("identifier", "Identifier"),
+)
+
+
+def _metadata_entry_lines(key: str, label: str, metadata: Mapping[str, Any]) -> list[str]:
+    if key not in metadata:
+        return [f"{label}: not set"]
+    value = metadata[key]
+    if key == "authors" and isinstance(value, list) and all(
+        isinstance(author, str) for author in value
+    ):
+        rendered = ", ".join(value) if value else "[]"
+    elif isinstance(value, str):
+        rendered = value
+    else:
+        rendered = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
+    if "\n" not in rendered:
+        return [f"{label}: {rendered}"]
+    return [f"{label}:", *(f"  {line}" for line in rendered.splitlines())]
+
+
+def _render_stored_metadata(metadata: Mapping[str, Any]) -> str:
+    lines = ["Stored metadata", ""]
+    known_keys = {key for key, _label in _BOOK_METADATA_FIELDS}
+    for key, label in _BOOK_METADATA_FIELDS:
+        lines.extend(_metadata_entry_lines(key, label, metadata))
+    for key in sorted(metadata.keys() - known_keys):
+        lines.extend(_metadata_entry_lines(key, key.replace("_", " ").title(), metadata))
+    return "\n".join(lines)
+
+
+@book_app.command("metadata")  # type: ignore[untyped-decorator]
+def book_metadata(
+    bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Display metadata stored in a directory or ZIP SSMD book bundle."""
+
+    def run() -> None:
+        book = load_book_bundle(bundle)
+        if json_output:
+            typer.echo(
+                json.dumps(
+                    {"metadata": dict(book.metadata)},
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            )
+            return
+        typer.echo(_render_stored_metadata(book.metadata))
+
+    _run_with_domain_errors(run)
+
+
+@book_app.command("convert")  # type: ignore[untyped-decorator]
 def book_convert(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     chapters: Annotated[str, typer.Option("--chapters")] = "all",
+    language: Annotated[
+        str | None, typer.Option("-l", "--language", help="Override the book language.")
+    ] = None,
+    metadata_file: Annotated[
+        Path | None,
+        typer.Option("--metadata-file", help="YAML file with structured metadata overrides."),
+    ] = None,
     sequence_fallback_mode: Annotated[
         SequenceFallbackModeOption,
         typer.Option("--sequence-fallback-mode"),
-    ] = SequenceFallbackModeOption.spell,
+    ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
     bundle_format: Annotated[str | None, typer.Option("--format")] = None,
     force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
 ) -> None:
@@ -252,6 +357,10 @@ def book_convert(
         book = convert_book(
             source,
             chapters=chapters,
+            language=language,
+            metadata_overrides=(
+                load_metadata_file(metadata_file) if metadata_file is not None else None
+            ),
             sequence_fallback_mode=sequence_fallback_mode.value,
         )
         destination = output or source.with_suffix(".ssmdbook")
@@ -269,7 +378,7 @@ def book_convert(
     _run_with_domain_errors(run)
 
 
-@book_app.command("validate")
+@book_app.command("validate")  # type: ignore[untyped-decorator]
 def book_validate(
     bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
     json_output: Annotated[bool, typer.Option("--json")] = False,

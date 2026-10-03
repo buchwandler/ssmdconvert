@@ -17,7 +17,7 @@ ssmd_version:   0.9
   "ssmd_version": "0.9",
   "metadata": {
     "title": "Example Book",
-    "sequence_fallback_mode": "spell"
+    "sequence_fallback_mode": "preserve"
   },
   "source": {
     "format": "epub",
@@ -45,7 +45,12 @@ ssmd_version:   0.9
 }
 ```
 
-`metadata.sequence_fallback_mode` is application metadata with the values `spell` and `preserve`. New conversions always write it, defaulting to `spell`; each chapter mirrors the same setting in its SSMD front matter. Older bundles may omit the value and remain valid. Consumers should treat absence as `spell` and reject any present unsupported value.
+`metadata.sequence_fallback_mode` is application metadata with the values `spell` and `preserve`. New conversions always write it, defaulting to `preserve`; `spell` is still available explicitly. Each chapter mirrors the same setting in its SSMD front matter. Older bundles may omit the value and remain valid. The new writer default does not define or change consumer behavior for an absent legacy field.
+
+
+`metadata` remains an open JSON object within schema version 1. Converters may store portable SSMD keys such as `language`, `voice_bindings`, `voice_defaults`, `pause_defaults`, `prosody_transitions`, `language_detection`, and `requires`, along with bibliographic values. Readers do not require these optional keys and continue to accept unknown third-party metadata keys. Generated chapters mirror the portable SSMD keys and are validated as SSMD 0.9.
+
+Use `ssmdconvert book metadata BUNDLE` to inspect metadata only after the bundle passes normal validation. The optional `--json` form emits a stable `{"metadata": ...}` object; nested values are rendered as indented JSON in human output.
 
 The `chapters` array order is authoritative for book order. Consumers must not sort directory entries or filenames to infer order. Chapter IDs are canonical `chapter-NNNN` identities; each bundle path is derived from the ID. `source_id` and `source_parent_id` preserve EPUB navigation identifiers, while `parent_id` refers to a canonical chapter ID when the parent appears in the book inventory.
 

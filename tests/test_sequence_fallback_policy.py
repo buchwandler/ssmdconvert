@@ -24,7 +24,12 @@ def test_speech_preparation_uses_the_shared_default_and_validator() -> None:
     assert (
         SpeechPreparationOptions().sequence_fallback_mode
         == (DEFAULT_SEQUENCE_FALLBACK_MODE)
-        == "spell"
+        == "preserve"
     )
     with pytest.raises(ValueError, match="sequence_fallback_mode"):
         SpeechPreparationOptions(sequence_fallback_mode="invalid")  # type: ignore[arg-type]
+
+
+
+def test_default_sequence_fallback_mode_is_preserve() -> None:
+    assert DEFAULT_SEQUENCE_FALLBACK_MODE == "preserve"

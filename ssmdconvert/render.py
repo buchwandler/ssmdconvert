@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from ssmd import lint, parse_structure, serialize_front_matter
 
+from .metadata import PORTABLE_SSMD_METADATA_KEYS
 from .models import Document
 
 
@@ -29,7 +30,7 @@ def render_document(document: Document) -> str:
         section.markdown.strip() for section in document.sections if section.markdown.strip()
     )
     body = body.rstrip() + "\n" if body else ""
-    result = serialize_front_matter(header, body)
+    result = cast(str, serialize_front_matter(header, body))
     validate_ssmd_document(result)
     return result
 
@@ -40,14 +41,13 @@ def render_standalone_chapter(
     metadata: Mapping[str, Any],
 ) -> str:
     header: dict[str, Any] = {"ssmd_version": "0.9", "title": title}
-    if metadata.get("language"):
-        header["language"] = metadata["language"]
+    for key in PORTABLE_SSMD_METADATA_KEYS:
+        if key in metadata:
+            header[key] = metadata[key]
     authors = metadata.get("authors")
     if authors:
         header["author"] = authors[0]
     body = markdown.rstrip() + "\n" if markdown else ""
-    if metadata.get("sequence_fallback_mode") is not None:
-        header["sequence_fallback_mode"] = metadata["sequence_fallback_mode"]
-    result = serialize_front_matter(header, body)
+    result = cast(str, serialize_front_matter(header, body))
     validate_ssmd_document(result)
     return result

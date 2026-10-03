@@ -3,7 +3,7 @@
 ## Convert a document
 
 ```bash
-ssmdconvert convert INPUT [-o OUTPUT] [--title TITLE] [--author AUTHOR] [--language LANGUAGE] [--sequence-fallback-mode spell|preserve]
+ssmdconvert convert INPUT [-o OUTPUT] [--title TITLE] [--author AUTHOR] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve]
 ```
 
 Examples:
@@ -28,14 +28,24 @@ Optional metadata can be supplied during conversion:
 ssmdconvert convert manuscript.txt \
   --title "Example" \
   --author "A. Writer" \
-  --language en
+  -l en
 ```
 
-The sequence fallback policy controls residual sequence handling for downstream speech preparation. Both conversion commands accept `spell` or `preserve`; the default is `spell`. The chosen value is persisted in SSMD front matter and, for books, in manifest metadata and every chapter.
+
+Pass a UTF-8 YAML mapping with `--metadata-file PATH` to either `convert` or `book convert` for nested portable metadata and bibliographic overrides. Values are JSON-compatible; only supported metadata keys are accepted. Metadata precedence is source, file, then explicit CLI values. The effective sequence fallback option is applied last.
+
+```yaml
+language: de-DE
+voice_defaults:
+  narrator:
+    rate: slow
+```
+
+The sequence fallback policy controls residual sequence handling for downstream speech preparation. New conversions default to `preserve`; pass `--sequence-fallback-mode spell` to select `spell` explicitly. The chosen value is persisted in SSMD front matter and, for books, in manifest metadata and every chapter. This writer default does not change consumer behavior for legacy files or bundles where the field is absent.
 
 ```bash
-ssmdconvert convert manuscript.md --sequence-fallback-mode preserve -o manuscript.ssmd
-ssmdconvert book convert novel.epub --sequence-fallback-mode preserve -o novel.ssmdbook
+ssmdconvert convert manuscript.md -o manuscript.ssmd
+ssmdconvert book convert novel.epub -l de-DE -o novel.ssmdbook
 ```
 
 ## Inspect a source
@@ -55,14 +65,18 @@ The book CLI uses explicit subcommands:
 
 ```bash
 ssmdconvert book inspect novel.epub [--json]
-ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [--sequence-fallback-mode spell|preserve]
+ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve]
 ssmdconvert book validate BUNDLE [--json]
+ssmdconvert book metadata BUNDLE [--json]
 ```
 
 Selectors use original 1-based source chapter numbers. They accept a single number, a range, a comma-separated list, or a mixture such as `1,3-5`. Selected chapters remain in original source order.
 
 Book output format is inferred only from `.ssmdbook` (directory) and `.ssmdbook.zip` (ZIP). For other names, specify `--format directory` or `--format zip`. Existing bundles are refused unless `--force` is supplied. A forced directory output replaces the complete previous directory; stale files are not merged into the new bundle.
 
+
+
+Use `ssmdconvert book metadata BUNDLE` to display validated metadata stored in either a directory or ZIP bundle. Add `--json` for a deterministic `{"metadata": ...}` object. The human form labels absent known values as `not set` and renders nested values indented.
 ## Help
 
 ```bash
@@ -73,4 +87,5 @@ ssmdconvert book --help
 ssmdconvert book inspect --help
 ssmdconvert book convert --help
 ssmdconvert book validate --help
+ssmdconvert book metadata --help
 ```
