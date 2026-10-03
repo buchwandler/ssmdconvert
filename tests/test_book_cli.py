@@ -224,7 +224,7 @@ def test_book_refresh_and_non_mutating_check(tmp_path: Path) -> None:
     chapter_entry = manifest["chapters"][0]
     chapter_path = bundle / chapter_entry["path"]
     edited_text = chapter_path.read_text(encoding="utf-8") + "\n\nEdited in workspace.\n"
-    chapter_path.write_text(edited_text, encoding="utf-8")
+    chapter_path.write_bytes(edited_text.encode("utf-8"))
     dirty_manifest = manifest_path.read_bytes()
 
     check = runner.invoke(app, ["book", "refresh", str(bundle), "--check"])
@@ -282,7 +282,7 @@ def test_book_pack_packs_dirty_workspace_without_readio_or_source_mutation(tmp_p
     chapter_entry = manifest["chapters"][0]
     chapter_path = bundle / chapter_entry["path"]
     edited_text = chapter_path.read_text(encoding="utf-8") + "\n\nPacked current edit.\n"
-    chapter_path.write_text(edited_text, encoding="utf-8")
+    chapter_path.write_bytes(edited_text.encode("utf-8"))
     local_state = bundle / ".readio" / "cache"
     local_state.mkdir(parents=True)
     (local_state / "state.json").write_text("downstream-only", encoding="utf-8")

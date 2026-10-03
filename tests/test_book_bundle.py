@@ -494,7 +494,7 @@ def test_workspace_loader_reports_clean_and_dirty_current_content(tmp_path: Path
     entry = manifest["chapters"][0]
     chapter_path = directory / entry["path"]
     edited_text = chapter_path.read_text(encoding="utf-8") + "\n\nEdited workspace text.\n"
-    chapter_path.write_text(edited_text, encoding="utf-8")
+    chapter_path.write_bytes(edited_text.encode("utf-8"))
 
     with pytest.raises(BookBundleValidationError, match="SHA256 mismatch"):
         load_book_bundle(directory)
@@ -541,7 +541,7 @@ def test_refresh_workspace_updates_digest_char_count_and_restores_strict_validit
     entry = manifest["chapters"][0]
     chapter_path = directory / entry["path"]
     edited_text = chapter_path.read_text(encoding="utf-8") + "\n\nRefreshed text.\n"
-    chapter_path.write_text(edited_text, encoding="utf-8")
+    chapter_path.write_bytes(edited_text.encode("utf-8"))
 
     refreshed = refresh_book_workspace(directory)
 
