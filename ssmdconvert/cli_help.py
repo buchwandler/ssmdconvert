@@ -23,7 +23,13 @@ class AdaptiveHelpFormatter(_BaseHelpFormatter):  # type: ignore[valid-type,misc
         col_max: int = 30,
         col_spacing: int = 2,
     ) -> None:
-        rows = list(rows)
+        # Typer 0.20 escapes its generated annotations whenever Rich is
+        # installed, including when plain Click help formatting is selected.
+        # Undo that escape so the annotation remains readable in either layout.
+        rows = [
+            (term, description.replace(r"\[default:", "[default:"))
+            for term, description in rows
+        ]
 
         if self.width >= NARROW_HELP_WIDTH:
             super().write_dl(rows, col_max=col_max, col_spacing=col_spacing)
