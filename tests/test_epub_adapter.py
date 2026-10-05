@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from epub_support import make_epub
+from ssmd import parse_structure
 
 from ssmdconvert import ConversionResult, Converter, convert_book
 from ssmdconvert._epub import _chapter_markdown_options, load_epub
@@ -30,7 +31,15 @@ def test_epub_is_standalone_and_follows_navigation_and_spine(tmp_path: Path) -> 
     assert "**strong**" in result.ssmd
     assert "*CSS emphasis*" in result.ssmd
     assert "*linked text*" in result.ssmd
-    assert "\n---\n" in result.ssmd
+    assert "\n...p\n" in result.ssmd
+    structure = parse_structure(result.ssmd, dialect="0.9")
+    assert "---" not in structure.clean_text
+    scene_breaks = [
+        event
+        for event in structure.events
+        if event.kind == "break" and event.attrs.get("strength") == "x-strong"
+    ]
+    assert len(scene_breaks) == 2
     assert "世界" in result.ssmd
 
 
@@ -101,6 +110,14 @@ def test_generic_and_book_conversion_share_epub_extraction(tmp_path: Path) -> No
     generic = Converter().convert(source)
     book = convert_book(source)
 
+    assert "\n---\n" in extracted.chapters[0].markdown
+    assert "\n...p\n" in generic.ssmd
+    assert "\n...p\n" in book.chapters[0].ssmd
+    book_structure = parse_structure(book.chapters[0].ssmd, dialect="0.9")
+    assert any(
+        event.kind == "break" and event.attrs.get("strength") == "x-strong"
+        for event in book_structure.events
+    )
     assert (
         generic.document.metadata["title"] == book.metadata["title"] == extracted.metadata["title"]
     )

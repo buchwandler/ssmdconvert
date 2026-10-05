@@ -25,7 +25,7 @@ classifiers = [
   "Topic :: Text Processing :: Markup",
 ]
 dependencies = [
-  "ssmd>=0.9.2,<0.10",
+  "ssmd>=0.9.3,<0.10",
   "epub2text>=0.2.8,<0.3",
   "markdown-it-py>=3.0,<5.0",
   "mdit-py-plugins>=0.4,<1.0",

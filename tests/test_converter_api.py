@@ -4,6 +4,7 @@ import pytest
 from ssmd import parse_structure
 
 from ssmdconvert import Converter, convert, convert_content
+from ssmdconvert._scene_breaks import project_scene_breaks
 from ssmdconvert.errors import UnsupportedInputError
 
 
@@ -86,3 +87,24 @@ def test_convert_content_applies_metadata_overrides() -> None:
     assert header["language"] == "fr-FR"
     assert header["voice_defaults"] == {}
     assert header["sequence_fallback_mode"] == "preserve"
+
+
+def test_generic_markdown_scene_break_is_native_ssmd_structure() -> None:
+    result = convert_content(
+        "Scene one.\n\n---\n\nScene two.",
+        input_format="markdown",
+        source_name="scenes.md",
+    )
+    parsed = parse_structure(result.ssmd, dialect="0.9")
+
+    assert "---" not in parsed.clean_text
+    assert any(
+        event.kind == "break" and event.attrs.get("strength") == "x-strong"
+        for event in parsed.events
+    )
+
+
+def test_scene_break_projection_only_matches_standalone_hr_blocks() -> None:
+    source = "Literal --- dashes.\n  ---  \n--x--"
+
+    assert project_scene_breaks(source) == "Literal --- dashes.\n...p\n--x--"

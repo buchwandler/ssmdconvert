@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from ssmd import parse_structure
+
 from ssmdconvert import Converter, convert_content
 
 
@@ -66,3 +68,35 @@ def test_in_memory_conversions_match_path_adapters(tmp_path: Path) -> None:
         assert from_content.document.metadata == from_path.document.metadata
         assert from_content.document.source.path is None
         assert from_content.document.source.name == source_name
+
+
+def test_markdown_scene_breaks_become_native_ssmd_breaks() -> None:
+    source = "Scene one.\n\n---\n\nScene two.\n\n---\n\nScene three."
+    result = convert_content(source, input_format="markdown", source_name="scenes.md")
+    structure = parse_structure(result.ssmd, dialect="0.9")
+
+    assert result.ssmd.count("...p") == 2
+    assert "<paragraph pause>" not in result.ssmd
+    assert "---" not in structure.clean_text
+    scene_breaks = [
+        event
+        for event in structure.events
+        if event.kind == "break" and event.attrs.get("strength") == "x-strong"
+    ]
+    assert len(scene_breaks) == 2
+
+
+def test_html_hr_becomes_native_ssmd_breaks() -> None:
+    source = "<p>Scene one.</p><hr><p>Scene two.</p><hr><p>Scene three.</p>"
+    result = convert_content(source, input_format="html", source_name="scenes.html")
+    structure = parse_structure(result.ssmd, dialect="0.9")
+
+    assert result.ssmd.count("...p") == 2
+    assert "<paragraph pause>" not in result.ssmd
+    assert "---" not in structure.clean_text
+    scene_breaks = [
+        event
+        for event in structure.events
+        if event.kind == "break" and event.attrs.get("strength") == "x-strong"
+    ]
+    assert len(scene_breaks) == 2

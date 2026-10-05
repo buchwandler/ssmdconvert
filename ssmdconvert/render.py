@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from ssmd import lint, parse_structure, serialize_front_matter
 
+from ._scene_breaks import project_scene_breaks
 from .metadata import PORTABLE_SSMD_METADATA_KEYS
 from .models import Document
 
@@ -26,9 +27,13 @@ def validate_ssmd_document(ssmd: str) -> None:
 def render_document(document: Document) -> str:
     header = dict(document.metadata)
     header["ssmd_version"] = "0.9"
-    body = "\n\n".join(
-        section.markdown.strip() for section in document.sections if section.markdown.strip()
+    sections = (
+        project_scene_breaks(section.markdown)
+        if document.source.format == "epub"
+        else section.markdown
+        for section in document.sections
     )
+    body = "\n\n".join(markdown.strip() for markdown in sections if markdown.strip())
     body = body.rstrip() + "\n" if body else ""
     result = cast(str, serialize_front_matter(header, body))
     validate_ssmd_document(result)
@@ -47,7 +52,7 @@ def render_standalone_chapter(
     authors = metadata.get("authors")
     if authors:
         header["author"] = authors[0]
-    body = markdown.rstrip() + "\n" if markdown else ""
+    body = project_scene_breaks(markdown).rstrip() + "\n" if markdown else ""
     result = cast(str, serialize_front_matter(header, body))
     validate_ssmd_document(result)
     return result

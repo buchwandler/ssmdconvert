@@ -30,7 +30,7 @@ def make_epub(
         "<p>Hello, 世界, <em>emphasis</em> and <strong>strong</strong>, "
         '<span style="font-style: italic">CSS emphasis</span>, '
         '<a href="https://example.test"><em>linked text</em></a>.' + chapter_one_suffix + "</p>"
-        "<hr/><p>After the break.</p></body></html>"
+        "<hr/><p>After the break.</p><hr/><p>Final scene.</p></body></html>"
     )
     chapter_two = epub.EpubHtml(
         title="One" if duplicate_visible_titles else "Two",

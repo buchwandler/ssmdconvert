@@ -36,7 +36,7 @@ def test_speech_preparation_dependencies_are_bounded() -> None:
     data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     dependencies = data["project"]["dependencies"]
 
-    assert "ssmd>=0.9.2,<0.10" in dependencies
+    assert "ssmd>=0.9.3,<0.10" in dependencies
     assert "epub2text>=0.2.8,<0.3" in dependencies
     assert "typer>=0.20,<1" in dependencies
     assert "spokenform>=0.4.3,<0.5" not in dependencies

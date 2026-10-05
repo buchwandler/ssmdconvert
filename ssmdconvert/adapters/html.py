@@ -4,6 +4,7 @@ import re
 from html.parser import HTMLParser
 from pathlib import Path
 
+from .._scene_breaks import SCENE_BREAK_CONTROL
 from ..models import Document, Section, SourceInfo
 from .common import read_text_file
 
@@ -54,6 +55,10 @@ class _HTMLToMarkdown(HTMLParser):
             level = int(tag[1])
             self.parts.append("#" * level + " ")
             self._heading_text = []
+        elif tag == "hr":
+            self._newline(2)
+            self.parts.append(SCENE_BREAK_CONTROL)
+            self._newline(2)
         elif tag in _BLOCKS:
             self._newline(2)
             if tag == "blockquote":

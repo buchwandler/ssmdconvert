@@ -58,3 +58,21 @@ def test_existing_ssmd_is_reemitted_as_09_without_duplicate_front_matter(
         for issue in lint(result.ssmd, profile="ssmd-core", dialect="0.9")
         if issue.severity == "error"
     ]
+
+
+def test_ssmd_scene_separator_is_preserved_as_input_semantics(tmp_path: Path) -> None:
+    source = tmp_path / "existing.ssmd.md"
+    source.write_text(
+        '---\nssmd_version: "0.9"\ntitle: Existing\n---\nScene one.\n\n---\n\nScene two.\n',
+        encoding="utf-8",
+    )
+
+    result = Converter().convert(source)
+    parsed = parse_structure(result.ssmd, dialect="0.9")
+
+    assert "\n---\n" in result.ssmd
+    assert "\n...p\n" not in result.ssmd
+    assert any(
+        event.kind == "break" and event.attrs.get("strength") == "x-strong"
+        for event in parsed.events
+    )

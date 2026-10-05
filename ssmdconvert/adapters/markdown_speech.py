@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Any, cast
+from typing import Any
 
 import ssmd
 from markdown_it import MarkdownIt
 from mdit_py_plugins.gfm import gfm_plugin
+
+from .._scene_breaks import SCENE_BREAK_CONTROL
+
+
+@dataclass(frozen=True)
+class _SceneBreak:
+    pass
+
 
 _HIDDEN_HTML_TAGS = frozenset({"script", "style", "template", "noscript", "iframe", "object"})
 
@@ -201,8 +210,8 @@ def _render_list(node: _Node, ordered: bool) -> list[str]:
     return result
 
 
-def _render_nodes(nodes: list[_Node]) -> list[str]:
-    blocks: list[str] = []
+def _render_nodes(nodes: list[_Node]) -> list[str | _SceneBreak]:
+    blocks: list[str | _SceneBreak] = []
     for node in nodes:
         kind = node.token.type
         if kind == "heading_open":
@@ -220,11 +229,9 @@ def _render_nodes(nodes: list[_Node]) -> list[str]:
         elif kind == "blockquote_open":
             quoted = _render_nodes(node.children)
             if quoted:
-                if quoted[0].startswith("Quote: "):
-                    blocks.extend(quoted)
-                else:
+                if isinstance(quoted[0], str) and not quoted[0].startswith("Quote: "):
                     quoted[0] = _sentence(f"Quote: {quoted[0]}")
-                    blocks.extend(quoted)
+                blocks.extend(quoted)
         elif kind in {"fence", "code_block"}:
             code = node.token.content.rstrip("\n")
             blocks.append(
@@ -235,7 +242,7 @@ def _render_nodes(nodes: list[_Node]) -> list[str]:
                 )
             )
         elif kind == "hr":
-            blocks.append("<paragraph pause>")
+            blocks.append(_SceneBreak())
         elif kind == "table_open":
             blocks.extend(_render_table(node))
         elif kind == "html_block":
@@ -248,8 +255,12 @@ def _render_nodes(nodes: list[_Node]) -> list[str]:
             label = (node.token.meta or {}).get("label", "")
             content = _render_nodes(node.children)
             if content:
-                blocks.append(_sentence(f"Footnote {label}. {content[0]}"))
-                blocks.extend(content[1:])
+                if isinstance(content[0], _SceneBreak):
+                    blocks.append(_sentence(f"Footnote {label}."))
+                    blocks.extend(content)
+                else:
+                    blocks.append(_sentence(f"Footnote {label}. {content[0]}"))
+                    blocks.extend(content[1:])
         elif kind == "inline":
             text = _render_inline(node.token)
             if text:
@@ -262,6 +273,12 @@ def markdown_to_speech(text: str) -> str:
     parser = MarkdownIt("commonmark", {"html": True})
     gfm_plugin(parser)
     tokens = parser.parse(source)
-    blocks = [_normalise_inline(block) for block in _render_nodes(_build_tree(tokens))]
-    projected = "\n\n".join(block for block in blocks if block)
-    return cast(str, ssmd.escape_ssmd_syntax(projected).strip())
+    rendered: list[str] = []
+    for block in _render_nodes(_build_tree(tokens)):
+        if isinstance(block, _SceneBreak):
+            rendered.append(SCENE_BREAK_CONTROL)
+        else:
+            prose = _normalise_inline(block)
+            if prose:
+                rendered.append(ssmd.escape_ssmd_syntax(prose))
+    return "\n\n".join(rendered).strip()
