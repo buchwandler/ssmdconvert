@@ -1,0 +1,22 @@
+rows:
+  - sha: 0aafda12fe948a7364b441e6981980c15e6cd337
+    inspected: true
+    inspected_paths:
+      - pyproject.toml
+      - ssmdconvert/_scene_breaks.py
+      - ssmdconvert/adapters/html.py
+      - ssmdconvert/adapters/markdown_speech.py
+      - ssmdconvert/render.py
+      - tests/epub_support.py
+      - tests/test_converter_api.py
+      - tests/test_epub_adapter.py
+      - tests/test_markdown_html.py
+      - tests/test_packaging.py
+      - tests/test_ssmd_adapter.py
+    observed_behavior: "Markdown and HTML scene separators, plus EPUB horizontal rules, are converted to native SSMD scene-break controls; coverage includes converter, adapter, render, and packaging tests."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Reviewed the implementation and associated tests."
+    stale: false

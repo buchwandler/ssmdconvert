@@ -1,0 +1,375 @@
+ pyproject.toml                          |  2 +-
+ ssmdconvert/_scene_breaks.py            | 10 ++++++++
+ ssmdconvert/adapters/html.py            |  5 ++++
+ ssmdconvert/adapters/markdown_speech.py | 43 +++++++++++++++++++++++----------
+ ssmdconvert/render.py                   | 11 ++++++---
+ tests/epub_support.py                   |  2 +-
+ tests/test_converter_api.py             | 22 +++++++++++++++++
+ tests/test_epub_adapter.py              | 19 ++++++++++++++-
+ tests/test_markdown_html.py             | 34 ++++++++++++++++++++++++++
+ tests/test_packaging.py                 |  2 +-
+ tests/test_ssmd_adapter.py              | 18 ++++++++++++++
+ 11 files changed, 148 insertions(+), 20 deletions(-)
+
+diff --git a/pyproject.toml b/pyproject.toml
+index 3238f35..0604a89 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -25,7 +25,7 @@ classifiers = [
+   "Topic :: Text Processing :: Markup",
+ ]
+ dependencies = [
+-  "ssmd>=0.9.2,<0.10",
++  "ssmd>=0.9.3,<0.10",
+   "epub2text>=0.2.8,<0.3",
+   "markdown-it-py>=3.0,<5.0",
+   "mdit-py-plugins>=0.4,<1.0",
+diff --git a/ssmdconvert/_scene_breaks.py b/ssmdconvert/_scene_breaks.py
+new file mode 100644
+index 0000000..0267f08
+--- /dev/null
++++ b/ssmdconvert/_scene_breaks.py
+@@ -0,0 +1,10 @@
++from __future__ import annotations
++
++import re
++
++SCENE_BREAK_CONTROL = "...p"
++
++
++def project_scene_breaks(markdown: str) -> str:
++    """Project standalone Markdown scene-break blocks into canonical SSMD controls."""
++    return re.sub(r"(?m)^[ \t]*---[ \t]*$", SCENE_BREAK_CONTROL, markdown)
+diff --git a/ssmdconvert/adapters/html.py b/ssmdconvert/adapters/html.py
+index 334ab65..056dafc 100644
+--- a/ssmdconvert/adapters/html.py
++++ b/ssmdconvert/adapters/html.py
+@@ -4,6 +4,7 @@ import re
+ from html.parser import HTMLParser
+ from pathlib import Path
+
++from .._scene_breaks import SCENE_BREAK_CONTROL
+ from ..models import Document, Section, SourceInfo
+ from .common import read_text_file
+
+@@ -54,6 +55,10 @@ class _HTMLToMarkdown(HTMLParser):
+             level = int(tag[1])
+             self.parts.append("#" * level + " ")
+             self._heading_text = []
++        elif tag == "hr":
++            self._newline(2)
++            self.parts.append(SCENE_BREAK_CONTROL)
++            self._newline(2)
+         elif tag in _BLOCKS:
+             self._newline(2)
+             if tag == "blockquote":
+diff --git a/ssmdconvert/adapters/markdown_speech.py b/ssmdconvert/adapters/markdown_speech.py
+index 77b31ee..5df34b0 100644
+--- a/ssmdconvert/adapters/markdown_speech.py
++++ b/ssmdconvert/adapters/markdown_speech.py
+@@ -1,12 +1,21 @@
+ from __future__ import annotations
+
++from dataclasses import dataclass
+ from html.parser import HTMLParser
+-from typing import Any, cast
++from typing import Any
+
+ import ssmd
+ from markdown_it import MarkdownIt
+ from mdit_py_plugins.gfm import gfm_plugin
+
++from .._scene_breaks import SCENE_BREAK_CONTROL
++
++
++@dataclass(frozen=True)
++class _SceneBreak:
++    pass
++
++
+ _HIDDEN_HTML_TAGS = frozenset({"script", "style", "template", "noscript", "iframe", "object"})
+
+
+@@ -201,8 +210,8 @@ def _render_list(node: _Node, ordered: bool) -> list[str]:
+     return result
+
+
+-def _render_nodes(nodes: list[_Node]) -> list[str]:
+-    blocks: list[str] = []
++def _render_nodes(nodes: list[_Node]) -> list[str | _SceneBreak]:
++    blocks: list[str | _SceneBreak] = []
+     for node in nodes:
+         kind = node.token.type
+         if kind == "heading_open":
+@@ -220,11 +229,9 @@ def _render_nodes(nodes: list[_Node]) -> list[str]:
+         elif kind == "blockquote_open":
+             quoted = _render_nodes(node.children)
+             if quoted:
+-                if quoted[0].startswith("Quote: "):
+-                    blocks.extend(quoted)
+-                else:
++                if isinstance(quoted[0], str) and not quoted[0].startswith("Quote: "):
+                     quoted[0] = _sentence(f"Quote: {quoted[0]}")
+-                    blocks.extend(quoted)
++                blocks.extend(quoted)
+         elif kind in {"fence", "code_block"}:
+             code = node.token.content.rstrip("\n")
+             blocks.append(
+@@ -235,7 +242,7 @@ def _render_nodes(nodes: list[_Node]) -> list[str]:
+                 )
+             )
+         elif kind == "hr":
+-            blocks.append("<paragraph pause>")
++            blocks.append(_SceneBreak())
+         elif kind == "table_open":
+             blocks.extend(_render_table(node))
+         elif kind == "html_block":
+@@ -248,8 +255,12 @@ def _render_nodes(nodes: list[_Node]) -> list[str]:
+             label = (node.token.meta or {}).get("label", "")
+             content = _render_nodes(node.children)
+             if content:
+-                blocks.append(_sentence(f"Footnote {label}. {content[0]}"))
+-                blocks.extend(content[1:])
++                if isinstance(content[0], _SceneBreak):
++                    blocks.append(_sentence(f"Footnote {label}."))
++                    blocks.extend(content)
++                else:
++                    blocks.append(_sentence(f"Footnote {label}. {content[0]}"))
++                    blocks.extend(content[1:])
+         elif kind == "inline":
+             text = _render_inline(node.token)
+             if text:
+@@ -262,6 +273,12 @@ def markdown_to_speech(text: str) -> str:
+     parser = MarkdownIt("commonmark", {"html": True})
+     gfm_plugin(parser)
+     tokens = parser.parse(source)
+-    blocks = [_normalise_inline(block) for block in _render_nodes(_build_tree(tokens))]
+-    projected = "\n\n".join(block for block in blocks if block)
+-    return cast(str, ssmd.escape_ssmd_syntax(projected).strip())
++    rendered: list[str] = []
++    for block in _render_nodes(_build_tree(tokens)):
++        if isinstance(block, _SceneBreak):
++            rendered.append(SCENE_BREAK_CONTROL)
++        else:
++            prose = _normalise_inline(block)
++            if prose:
++                rendered.append(ssmd.escape_ssmd_syntax(prose))
++    return "\n\n".join(rendered).strip()
+diff --git a/ssmdconvert/render.py b/ssmdconvert/render.py
+index 2ffeae0..f2f4328 100644
+--- a/ssmdconvert/render.py
++++ b/ssmdconvert/render.py
+@@ -5,6 +5,7 @@ from typing import Any, cast
+
+ from ssmd import lint, parse_structure, serialize_front_matter
+
++from ._scene_breaks import project_scene_breaks
+ from .metadata import PORTABLE_SSMD_METADATA_KEYS
+ from .models import Document
+
+@@ -26,9 +27,13 @@ def validate_ssmd_document(ssmd: str) -> None:
+ def render_document(document: Document) -> str:
+     header = dict(document.metadata)
+     header["ssmd_version"] = "0.9"
+-    body = "\n\n".join(
+-        section.markdown.strip() for section in document.sections if section.markdown.strip()
++    sections = (
++        project_scene_breaks(section.markdown)
++        if document.source.format == "epub"
++        else section.markdown
++        for section in document.sections
+     )
++    body = "\n\n".join(markdown.strip() for markdown in sections if markdown.strip())
+     body = body.rstrip() + "\n" if body else ""
+     result = cast(str, serialize_front_matter(header, body))
+     validate_ssmd_document(result)
+@@ -47,7 +52,7 @@ def render_standalone_chapter(
+     authors = metadata.get("authors")
+     if authors:
+         header["author"] = authors[0]
+-    body = markdown.rstrip() + "\n" if markdown else ""
++    body = project_scene_breaks(markdown).rstrip() + "\n" if markdown else ""
+     result = cast(str, serialize_front_matter(header, body))
+     validate_ssmd_document(result)
+     return result
+diff --git a/tests/epub_support.py b/tests/epub_support.py
+index 321caa2..ff31ad9 100644
+--- a/tests/epub_support.py
++++ b/tests/epub_support.py
+@@ -30,7 +30,7 @@ def make_epub(
+         "<p>Hello, 世界, <em>emphasis</em> and <strong>strong</strong>, "
+         '<span style="font-style: italic">CSS emphasis</span>, '
+         '<a href="https://example.test"><em>linked text</em></a>.' + chapter_one_suffix + "</p>"
+-        "<hr/><p>After the break.</p></body></html>"
++        "<hr/><p>After the break.</p><hr/><p>Final scene.</p></body></html>"
+     )
+     chapter_two = epub.EpubHtml(
+         title="One" if duplicate_visible_titles else "Two",
+diff --git a/tests/test_converter_api.py b/tests/test_converter_api.py
+index ca8de44..76969d1 100644
+--- a/tests/test_converter_api.py
++++ b/tests/test_converter_api.py
+@@ -4,6 +4,7 @@ import pytest
+ from ssmd import parse_structure
+
+ from ssmdconvert import Converter, convert, convert_content
++from ssmdconvert._scene_breaks import project_scene_breaks
+ from ssmdconvert.errors import UnsupportedInputError
+
+
+@@ -86,3 +87,24 @@ def test_convert_content_applies_metadata_overrides() -> None:
+     assert header["language"] == "fr-FR"
+     assert header["voice_defaults"] == {}
+     assert header["sequence_fallback_mode"] == "preserve"
++
++
++def test_generic_markdown_scene_break_is_native_ssmd_structure() -> None:
++    result = convert_content(
++        "Scene one.\n\n---\n\nScene two.",
++        input_format="markdown",
++        source_name="scenes.md",
++    )
++    parsed = parse_structure(result.ssmd, dialect="0.9")
++
++    assert "---" not in parsed.clean_text
++    assert any(
++        event.kind == "break" and event.attrs.get("strength") == "x-strong"
++        for event in parsed.events
++    )
++
++
++def test_scene_break_projection_only_matches_standalone_hr_blocks() -> None:
++    source = "Literal --- dashes.\n  ---  \n--x--"
++
++    assert project_scene_breaks(source) == "Literal --- dashes.\n...p\n--x--"
+diff --git a/tests/test_epub_adapter.py b/tests/test_epub_adapter.py
+index e940766..75f5bdf 100644
+--- a/tests/test_epub_adapter.py
++++ b/tests/test_epub_adapter.py
+@@ -4,6 +4,7 @@ from pathlib import Path
+
+ import pytest
+ from epub_support import make_epub
++from ssmd import parse_structure
+
+ from ssmdconvert import ConversionResult, Converter, convert_book
+ from ssmdconvert._epub import _chapter_markdown_options, load_epub
+@@ -30,7 +31,15 @@ def test_epub_is_standalone_and_follows_navigation_and_spine(tmp_path: Path) ->
+     assert "**strong**" in result.ssmd
+     assert "*CSS emphasis*" in result.ssmd
+     assert "*linked text*" in result.ssmd
+-    assert "\n---\n" in result.ssmd
++    assert "\n...p\n" in result.ssmd
++    structure = parse_structure(result.ssmd, dialect="0.9")
++    assert "---" not in structure.clean_text
++    scene_breaks = [
++        event
++        for event in structure.events
++        if event.kind == "break" and event.attrs.get("strength") == "x-strong"
++    ]
++    assert len(scene_breaks) == 2
+     assert "世界" in result.ssmd
+
+
+@@ -101,6 +110,14 @@ def test_generic_and_book_conversion_share_epub_extraction(tmp_path: Path) -> No
+     generic = Converter().convert(source)
+     book = convert_book(source)
+
++    assert "\n---\n" in extracted.chapters[0].markdown
++    assert "\n...p\n" in generic.ssmd
++    assert "\n...p\n" in book.chapters[0].ssmd
++    book_structure = parse_structure(book.chapters[0].ssmd, dialect="0.9")
++    assert any(
++        event.kind == "break" and event.attrs.get("strength") == "x-strong"
++        for event in book_structure.events
++    )
+     assert (
+         generic.document.metadata["title"] == book.metadata["title"] == extracted.metadata["title"]
+     )
+diff --git a/tests/test_markdown_html.py b/tests/test_markdown_html.py
+index 668ebbe..85b0c29 100644
+--- a/tests/test_markdown_html.py
++++ b/tests/test_markdown_html.py
+@@ -1,5 +1,7 @@
+ from pathlib import Path
+
++from ssmd import parse_structure
++
+ from ssmdconvert import Converter, convert_content
+
+
+@@ -66,3 +68,35 @@ def test_in_memory_conversions_match_path_adapters(tmp_path: Path) -> None:
+         assert from_content.document.metadata == from_path.document.metadata
+         assert from_content.document.source.path is None
+         assert from_content.document.source.name == source_name
++
++
++def test_markdown_scene_breaks_become_native_ssmd_breaks() -> None:
++    source = "Scene one.\n\n---\n\nScene two.\n\n---\n\nScene three."
++    result = convert_content(source, input_format="markdown", source_name="scenes.md")
++    structure = parse_structure(result.ssmd, dialect="0.9")
++
++    assert result.ssmd.count("...p") == 2
++    assert "<paragraph pause>" not in result.ssmd
++    assert "---" not in structure.clean_text
++    scene_breaks = [
++        event
++        for event in structure.events
++        if event.kind == "break" and event.attrs.get("strength") == "x-strong"
++    ]
++    assert len(scene_breaks) == 2
++
++
++def test_html_hr_becomes_native_ssmd_breaks() -> None:
++    source = "<p>Scene one.</p><hr><p>Scene two.</p><hr><p>Scene three.</p>"
++    result = convert_content(source, input_format="html", source_name="scenes.html")
++    structure = parse_structure(result.ssmd, dialect="0.9")
++
++    assert result.ssmd.count("...p") == 2
++    assert "<paragraph pause>" not in result.ssmd
++    assert "---" not in structure.clean_text
++    scene_breaks = [
++        event
++        for event in structure.events
++        if event.kind == "break" and event.attrs.get("strength") == "x-strong"
++    ]
++    assert len(scene_breaks) == 2
+diff --git a/tests/test_packaging.py b/tests/test_packaging.py
+index a0286a0..9a7c3a2 100644
+--- a/tests/test_packaging.py
++++ b/tests/test_packaging.py
+@@ -36,7 +36,7 @@ def test_speech_preparation_dependencies_are_bounded() -> None:
+     data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+     dependencies = data["project"]["dependencies"]
+
+-    assert "ssmd>=0.9.2,<0.10" in dependencies
++    assert "ssmd>=0.9.3,<0.10" in dependencies
+     assert "epub2text>=0.2.8,<0.3" in dependencies
+     assert "typer>=0.20,<1" in dependencies
+     assert "spokenform>=0.4.3,<0.5" not in dependencies
+diff --git a/tests/test_ssmd_adapter.py b/tests/test_ssmd_adapter.py
+index b265b17..0af8519 100644
+--- a/tests/test_ssmd_adapter.py
++++ b/tests/test_ssmd_adapter.py
+@@ -58,3 +58,21 @@ def test_existing_ssmd_is_reemitted_as_09_without_duplicate_front_matter(
+         for issue in lint(result.ssmd, profile="ssmd-core", dialect="0.9")
+         if issue.severity == "error"
+     ]
++
++
++def test_ssmd_scene_separator_is_preserved_as_input_semantics(tmp_path: Path) -> None:
++    source = tmp_path / "existing.ssmd.md"
++    source.write_text(
++        '---\nssmd_version: "0.9"\ntitle: Existing\n---\nScene one.\n\n---\n\nScene two.\n',
++        encoding="utf-8",
++    )
++
++    result = Converter().convert(source)
++    parsed = parse_structure(result.ssmd, dialect="0.9")
++
++    assert "\n---\n" in result.ssmd
++    assert "\n...p\n" not in result.ssmd
++    assert any(
++        event.kind == "break" and event.attrs.get("strength") == "x-strong"
++        for event in parsed.events
++    )

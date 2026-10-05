@@ -1,0 +1,39 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.1.3
+git_base_ref: v0.1.2
+git_base_sha: 94e2ca5908bb8cd545719da6c3d84a319a46ed32
+git_head_ref: HEAD
+git_head_sha: 0aafda12fe948a7364b441e6981980c15e6cd337
+git_range: 94e2ca5908bb8cd545719da6c3d84a319a46ed32..0aafda12fe948a7364b441e6981980c15e6cd337
+commit_count: 1
+rows:
+  - sha: 0aafda12fe948a7364b441e6981980c15e6cd337
+    source_ref: git:0aafda12fe948a7364b441e6981980c15e6cd337
+    short_sha: 0aafda1
+    changed_paths:
+      - pyproject.toml
+      - ssmdconvert/_scene_breaks.py
+      - ssmdconvert/adapters/html.py
+      - ssmdconvert/adapters/markdown_speech.py
+      - ssmdconvert/render.py
+      - tests/epub_support.py
+      - tests/test_converter_api.py
+      - tests/test_epub_adapter.py
+      - tests/test_markdown_html.py
+      - tests/test_packaging.py
+      - tests/test_ssmd_adapter.py
+    stats:
+      files_changed: 11
+      insertions: 148
+      deletions: 20
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: handle scene breaks"
