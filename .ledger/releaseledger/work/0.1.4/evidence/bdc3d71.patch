@@ -1,0 +1,77 @@
+ ssmdconvert/analysis/source.py | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/ssmdconvert/analysis/source.py b/ssmdconvert/analysis/source.py
+index 5cbe750..6e1f180 100644
+--- a/ssmdconvert/analysis/source.py
++++ b/ssmdconvert/analysis/source.py
+@@ -2,6 +2,7 @@
+
+ from __future__ import annotations
+
++from collections.abc import Mapping
+ from pathlib import Path
+ from typing import Any
+
+@@ -20,6 +21,11 @@ def _title(metadata: dict[str, Any]) -> str | None:
+     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
++def _normalize_newlines(text: str) -> str:
++    """Use LF internally so parsing and write-back are platform-independent."""
++    return text.replace("\r\n", "\n").replace("\r", "\n")
++
++
+ def _book_source(
+     path: Path,
+     book: Book,
+@@ -28,12 +34,15 @@ def _book_source(
+     workspace_status: str,
+     dirty_chapters: tuple[str, ...] = (),
+     artifact_sha256: str | None = None,
++    chapter_hashes: Mapping[str, str] | None = None,
+ ) -> LoadedSsmdSource:
+     metadata = dict(book.metadata)
+     sections: list[LoadedSsmdSection] = []
+     hashes: list[tuple[str, str]] = []
+     for index, chapter in enumerate(book.chapters, start=1):
+-        chapter_hash = sha256_bytes(chapter.ssmd.encode("utf-8"))
++        chapter_hash = (chapter_hashes or {}).get(chapter.id) or sha256_bytes(
++            chapter.ssmd.encode("utf-8")
++        )
+         hashes.append((chapter.id, chapter_hash))
+         sections.append(
+             LoadedSsmdSection(
+@@ -41,7 +50,7 @@ def _book_source(
+                 index=index,
+                 title=chapter.title or None,
+                 level=chapter.level,
+-                ssmd=chapter.ssmd,
++                ssmd=_normalize_newlines(chapter.ssmd),
+                 source_number=chapter.source_number,
+                 href=chapter.href,
+                 parent_id=chapter.parent_id,
+@@ -80,12 +89,14 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
+         except Exception as exc:
+             raise AnalysisSourceError(f"could not load SSMD book workspace {path}: {exc}") from exc
+         dirty = tuple(chapter.id for chapter in workspace.chapters if chapter.dirty)
++        chapter_hashes = {chapter.id: chapter.actual_sha256 for chapter in workspace.chapters}
+         return _book_source(
+             path,
+             workspace.book,
+             workspace_type="directory",
+             workspace_status="dirty" if workspace.dirty else "clean",
+             dirty_chapters=dirty,
++            chapter_hashes=chapter_hashes,
+         )
+
+     if not path.is_file():
+@@ -117,7 +128,7 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
+     except OSError as exc:
+         raise AnalysisSourceError(f"could not read SSMD source {path}: {exc}") from exc
+     try:
+-        text = raw.decode("utf-8", errors="strict")
++        text = _normalize_newlines(raw.decode("utf-8", errors="strict"))
+     except UnicodeDecodeError as exc:
+         raise AnalysisSourceError(f"SSMD source is not valid UTF-8: {path}: {exc}") from exc
+     try:

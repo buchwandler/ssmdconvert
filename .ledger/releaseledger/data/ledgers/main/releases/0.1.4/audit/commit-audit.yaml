@@ -1,0 +1,148 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.1.4
+git_base_ref: v0.1.3
+git_base_sha: 42154e7a495292a832f5682a3618eb4cf68b6145
+git_head_ref: HEAD
+git_head_sha: 8b4e902d54b0f55c73e523ab2a5cfa51a16481bc
+git_range: 42154e7a495292a832f5682a3618eb4cf68b6145..8b4e902d54b0f55c73e523ab2a5cfa51a16481bc
+commit_count: 3
+rows:
+  - sha: 045bb1dd673e9f386126827cebd0a93160ed57d0
+    source_ref: git:045bb1dd673e9f386126827cebd0a93160ed57d0
+    short_sha: 045bb1d
+    changed_paths:
+      - MANIFEST.in
+      - README.md
+      - docs/analysis-cache.md
+      - docs/analysis-workflows.md
+      - docs/api.md
+      - docs/context.md
+      - docs/freeze.md
+      - docs/index.md
+      - docs/installation.md
+      - docs/migration-from-ttsready-cli.md
+      - docs/report.md
+      - docs/speech-annotations.md
+      - docs/speech-audit.md
+      - docs/txt.md
+      - docs/usage.md
+      - pyproject.toml
+      - ssmdconvert/analysis/__init__.py
+      - ssmdconvert/analysis/cache.py
+      - ssmdconvert/analysis/context.py
+      - ssmdconvert/analysis/fingerprints.py
+      - ssmdconvert/analysis/models.py
+      - ssmdconvert/analysis/prepare.py
+      - ssmdconvert/analysis/projection.py
+      - ssmdconvert/analysis/reporting.py
+      - ssmdconvert/analysis/serialization.py
+      - ssmdconvert/analysis/source.py
+      - ssmdconvert/analysis/units.py
+      - ssmdconvert/bundle.py
+      - ssmdconvert/chapter_selection.py
+      - ssmdconvert/cli.py
+      - ssmdconvert/errors.py
+      - ssmdconvert/speech/__init__.py
+      - ssmdconvert/speech/audit.py
+      - ssmdconvert/speech/mapping.py
+      - ssmdconvert/speech/materialize.py
+      - ssmdconvert/speech/models.py
+      - ssmdconvert/speech/prepare.py
+      - ssmdconvert/speech/workflows.py
+      - tests/test_analysis_cache.py
+      - tests/test_analysis_context.py
+      - tests/test_analysis_prepare.py
+      - tests/test_analysis_reporting.py
+      - tests/test_analysis_source.py
+      - tests/test_book_selection.py
+      - tests/test_cli.py
+      - tests/test_packaging.py
+      - tests/test_sequence_fallback_policy.py
+      - tests/test_speech_cli.py
+      - tests/test_speech_mapping.py
+      - tests/test_speech_preparation.py
+      - tools/smoke_installed.py
+    stats:
+      files_changed: 51
+      insertions: 5818
+      deletions: 1275
+    inspected: true
+    inspected_paths:
+      - pyproject.toml
+      - README.md
+      - docs/analysis-workflows.md
+      - docs/report.md
+      - docs/context.md
+      - docs/txt.md
+      - docs/speech-audit.md
+      - docs/speech-annotations.md
+      - docs/freeze.md
+      - ssmdconvert/analysis/cache.py
+      - ssmdconvert/analysis/context.py
+      - ssmdconvert/analysis/reporting.py
+      - ssmdconvert/cli.py
+      - ssmdconvert/speech/audit.py
+      - ssmdconvert/speech/materialize.py
+      - tests/test_analysis_reporting.py
+      - tests/test_analysis_context.py
+      - tests/test_speech_cli.py
+    observed_behavior:
+      Added a unified SSMD-aware analysis and speech workflow with
+      report, context, TXT projection, read-only speech audit, and safe annotate/freeze
+      write-back; added cached analysis snapshots and generic change IDs, integrated
+      the public ttsready API, and documented the new user-facing commands.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: use ttsready lib, report and context added"
+    target_entry_id: entry-0001
+    notes: ""
+  - sha: bdc3d712b17946a3aaf2eabc34970c304b2b8639
+    source_ref: git:bdc3d712b17946a3aaf2eabc34970c304b2b8639
+    short_sha: bdc3d71
+    changed_paths:
+      - ssmdconvert/analysis/source.py
+    stats:
+      files_changed: 1
+      insertions: 14
+      deletions: 3
+    inspected: true
+    inspected_paths:
+      - ssmdconvert/analysis/source.py
+      - tests/test_analysis_source.py
+    observed_behavior:
+      Normalized SSMD newlines to LF during source loading and preserved
+      workspace chapter byte hashes for platform-independent analysis and cache freshness.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: pytest"
+    target_entry_id: entry-0002
+    notes: ""
+  - sha: 8b4e902d54b0f55c73e523ab2a5cfa51a16481bc
+    source_ref: git:8b4e902d54b0f55c73e523ab2a5cfa51a16481bc
+    short_sha: 8b4e902
+    changed_paths:
+      - ssmdconvert/cli.py
+    stats:
+      files_changed: 1
+      insertions: 18
+      deletions: 5
+    inspected: true
+    inspected_paths:
+      - ssmdconvert/cli.py
+      - tests/test_speech_cli.py
+    observed_behavior:
+      Hardened speech materialization for directory bundles by rejecting
+      output destinations inside the source workspace and comparing chapter snapshots
+      after newline canonicalization.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: path"
+    target_entry_id: entry-0003
+    notes: ""

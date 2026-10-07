@@ -1,0 +1,100 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.1.4
+git_base_ref: 42154e7a495292a832f5682a3618eb4cf68b6145
+git_base_sha: 42154e7a495292a832f5682a3618eb4cf68b6145
+git_head_ref: 8b4e902d54b0f55c73e523ab2a5cfa51a16481bc
+git_head_sha: 8b4e902d54b0f55c73e523ab2a5cfa51a16481bc
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: Added SSMD-aware reporting, context lookup, TXT projection, and safe speech audit and write-back workflows
+    status: accepted
+    source_refs:
+      - git:045bb1dd673e9f386126827cebd0a93160ed57d0
+    paths:
+      - MANIFEST.in
+      - README.md
+      - docs/analysis-cache.md
+      - docs/analysis-workflows.md
+      - docs/api.md
+      - docs/context.md
+      - docs/freeze.md
+      - docs/index.md
+      - docs/installation.md
+      - docs/migration-from-ttsready-cli.md
+      - docs/report.md
+      - docs/speech-annotations.md
+      - docs/speech-audit.md
+      - docs/txt.md
+      - docs/usage.md
+      - pyproject.toml
+      - ssmdconvert/analysis/__init__.py
+      - ssmdconvert/analysis/cache.py
+      - ssmdconvert/analysis/context.py
+      - ssmdconvert/analysis/fingerprints.py
+      - ssmdconvert/analysis/models.py
+      - ssmdconvert/analysis/prepare.py
+      - ssmdconvert/analysis/projection.py
+      - ssmdconvert/analysis/reporting.py
+      - ssmdconvert/analysis/serialization.py
+      - ssmdconvert/analysis/source.py
+      - ssmdconvert/analysis/units.py
+      - ssmdconvert/bundle.py
+      - ssmdconvert/chapter_selection.py
+      - ssmdconvert/cli.py
+      - ssmdconvert/errors.py
+      - ssmdconvert/speech/__init__.py
+      - ssmdconvert/speech/audit.py
+      - ssmdconvert/speech/mapping.py
+      - ssmdconvert/speech/materialize.py
+      - ssmdconvert/speech/models.py
+      - ssmdconvert/speech/prepare.py
+      - ssmdconvert/speech/workflows.py
+      - tests/test_analysis_cache.py
+      - tests/test_analysis_context.py
+      - tests/test_analysis_prepare.py
+      - tests/test_analysis_reporting.py
+      - tests/test_analysis_source.py
+      - tests/test_book_selection.py
+      - tests/test_cli.py
+      - tests/test_packaging.py
+      - tests/test_sequence_fallback_policy.py
+      - tests/test_speech_cli.py
+      - tests/test_speech_mapping.py
+      - tests/test_speech_preparation.py
+      - tools/smoke_installed.py
+    sources:
+      - git:045bb1dd673e9f386126827cebd0a93160ed57d0
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: fixed
+    summary: Fixed platform-independent analysis freshness by normalizing SSMD newlines and preserving workspace byte hashes
+    status: accepted
+    source_refs:
+      - git:bdc3d712b17946a3aaf2eabc34970c304b2b8639
+    paths:
+      - ssmdconvert/analysis/source.py
+    sources:
+      - git:bdc3d712b17946a3aaf2eabc34970c304b2b8639
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: fixed
+    summary: Fixed bundle workspace safety and newline-stable source checks during speech materialization
+    status: accepted
+    source_refs:
+      - git:8b4e902d54b0f55c73e523ab2a5cfa51a16481bc
+    paths:
+      - ssmdconvert/cli.py
+    sources:
+      - git:8b4e902d54b0f55c73e523ab2a5cfa51a16481bc
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

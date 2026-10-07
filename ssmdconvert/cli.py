@@ -204,7 +204,6 @@ def _speech_materialize_to_destination(
     if bundle_format is not None and analysis.source.kind != "ssmdbook":
         raise ValueError("--format is only valid when writing an SSMD book bundle")
 
-
     if analysis.source.kind == "ssmdbook" and source.is_dir():
         workspace_root = source.resolve(strict=True)
         if destination.resolve(strict=False).is_relative_to(workspace_root):
@@ -237,11 +236,9 @@ def _speech_materialize_to_destination(
     current_by_id = {chapter.id: chapter for chapter in book.chapters}
     for section in analysis.sections:
         chapter = current_by_id.get(section.id)
-        if (
-            chapter is None
-            or _canonical_ssmd_bytes(chapter.ssmd.encode("utf-8"))
-            != _canonical_ssmd_bytes(section.ssmd.encode("utf-8"))
-        ):
+        if chapter is None or _canonical_ssmd_bytes(
+            chapter.ssmd.encode("utf-8")
+        ) != _canonical_ssmd_bytes(section.ssmd.encode("utf-8")):
             raise ValueError(
                 f"source chapter {section.id} changed during speech materialization; "
                 "no output was written"

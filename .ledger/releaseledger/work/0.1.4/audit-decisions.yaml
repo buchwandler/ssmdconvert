@@ -1,0 +1,62 @@
+rows:
+  - sha: 045bb1dd673e9f386126827cebd0a93160ed57d0
+    inspected: true
+    inspected_paths:
+      - pyproject.toml
+      - README.md
+      - docs/analysis-workflows.md
+      - docs/report.md
+      - docs/context.md
+      - docs/txt.md
+      - docs/speech-audit.md
+      - docs/speech-annotations.md
+      - docs/freeze.md
+      - ssmdconvert/analysis/cache.py
+      - ssmdconvert/analysis/context.py
+      - ssmdconvert/analysis/reporting.py
+      - ssmdconvert/cli.py
+      - ssmdconvert/speech/audit.py
+      - ssmdconvert/speech/materialize.py
+      - tests/test_analysis_reporting.py
+      - tests/test_analysis_context.py
+      - tests/test_speech_cli.py
+    observed_behavior: >-
+      Added a unified SSMD-aware analysis and speech workflow with report, context,
+      TXT projection, read-only speech audit, and safe annotate/freeze write-back;
+      added cached analysis snapshots and generic change IDs, integrated the public
+      ttsready API, and documented the new user-facing commands.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: bdc3d712b17946a3aaf2eabc34970c304b2b8639
+    inspected: true
+    inspected_paths:
+      - ssmdconvert/analysis/source.py
+      - tests/test_analysis_source.py
+    observed_behavior: >-
+      Normalized SSMD newlines to LF during source loading and preserved workspace
+      chapter byte hashes for platform-independent analysis and cache freshness.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: 8b4e902d54b0f55c73e523ab2a5cfa51a16481bc
+    inspected: true
+    inspected_paths:
+      - ssmdconvert/cli.py
+      - tests/test_speech_cli.py
+    observed_behavior: >-
+      Hardened speech materialization for directory bundles by rejecting output
+      destinations inside the source workspace and comparing chapter snapshots after
+      newline canonicalization.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
