@@ -110,6 +110,11 @@ def _same_path(left: Path, right: Path) -> bool:
     return left.exists() and right.exists() and os.path.samefile(left, right)
 
 
+def _canonical_ssmd_bytes(value: bytes) -> bytes:
+    """Compare SSMD snapshots independently of platform newline translation."""
+    return value.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def _reject_input_overwrite(source: Path, destination: Path) -> None:
     if _same_path(source, destination):
         raise ValueError("output destination must not be the input file")
@@ -199,10 +204,17 @@ def _speech_materialize_to_destination(
     if bundle_format is not None and analysis.source.kind != "ssmdbook":
         raise ValueError("--format is only valid when writing an SSMD book bundle")
 
+
+    if analysis.source.kind == "ssmdbook" and source.is_dir():
+        workspace_root = source.resolve(strict=True)
+        if destination.resolve(strict=False).is_relative_to(workspace_root):
+            raise ValueError("bundle output must be outside the source workspace")
     from .bundle import read_current_chapter_bytes
 
     for section in analysis.sections:
-        if read_current_chapter_bytes(source, section.id) != section.ssmd.encode("utf-8"):
+        current = _canonical_ssmd_bytes(read_current_chapter_bytes(source, section.id))
+        expected = _canonical_ssmd_bytes(section.ssmd.encode("utf-8"))
+        if current != expected:
             raise ValueError(
                 f"source chapter {section.id} changed during speech materialization; "
                 "no output was written"
@@ -219,16 +231,17 @@ def _speech_materialize_to_destination(
         return destination
 
     if source.is_dir():
-        workspace_root = source.resolve(strict=True)
-        if destination.resolve(strict=False).is_relative_to(workspace_root):
-            raise ValueError("bundle output must be outside the source workspace")
         book = load_book_workspace(source).book
     else:
         book = load_book_bundle(source)
     current_by_id = {chapter.id: chapter for chapter in book.chapters}
     for section in analysis.sections:
         chapter = current_by_id.get(section.id)
-        if chapter is None or chapter.ssmd != section.ssmd:
+        if (
+            chapter is None
+            or _canonical_ssmd_bytes(chapter.ssmd.encode("utf-8"))
+            != _canonical_ssmd_bytes(section.ssmd.encode("utf-8"))
+        ):
             raise ValueError(
                 f"source chapter {section.id} changed during speech materialization; "
                 "no output was written"
