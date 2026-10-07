@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 from collections.abc import Callable, Mapping
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -12,6 +12,15 @@ from typing import Annotated, Any, Literal
 import typer
 
 from . import __version__
+from .analysis.cache import analyze_with_cache
+from .analysis.context import lookup_context, render_context
+from .analysis.prepare import analyze_ssmd_source
+from .analysis.projection import project_txt
+from .analysis.reporting import (
+    render_json_report,
+    render_markdown_report,
+    report_to_dict,
+)
 from .books import convert_book, inspect_book
 from .bundle import (
     _publish_path_no_replace,
@@ -26,6 +35,8 @@ from .converter import Converter
 from .errors import SSMDConvertError
 from .metadata import load_metadata_file
 from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE
+from .speech.audit import audit_ssmd
+from .speech.workflows import materialize_analysis
 
 app = AdaptiveTyper(
     cls=AdaptiveTyperGroup,
@@ -42,6 +53,14 @@ book_app = AdaptiveTyper(
     help="Inspect and convert EPUB books.",
 )
 app.add_typer(book_app, name="book")
+speech_app = AdaptiveTyper(
+    cls=AdaptiveTyperGroup,
+    add_completion=False,
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    help="Audit, annotate, or freeze SSMD speech semantics.",
+)
+app.add_typer(speech_app, name="speech")
 
 
 class SequenceFallbackModeOption(str, Enum):
@@ -158,6 +177,109 @@ def _book_output_format(
     )
 
 
+def _speech_materialize_to_destination(
+    source: Path,
+    output: Path,
+    *,
+    chapters: str,
+    language: str | None,
+    sequence_fallback_mode: SequenceFallbackModeOption,
+    force: bool,
+    bundle_format: str | None,
+) -> Path:
+    analysis = analyze_ssmd_source(
+        source,
+        chapters=chapters,
+        language=language,
+        sequence_fallback_mode=sequence_fallback_mode.value,
+    )
+    materialized = materialize_analysis(analysis)
+    destination = _output_path(output)
+    _reject_input_overwrite(source, destination)
+    if bundle_format is not None and analysis.source.kind != "ssmdbook":
+        raise ValueError("--format is only valid when writing an SSMD book bundle")
+
+    from .bundle import read_current_chapter_bytes
+
+    for section in analysis.sections:
+        if read_current_chapter_bytes(source, section.id) != section.ssmd.encode("utf-8"):
+            raise ValueError(
+                f"source chapter {section.id} changed during speech materialization; "
+                "no output was written"
+            )
+
+    if analysis.source.kind == "ssmd":
+        section = analysis.sections[0]
+        _write_text_atomically(
+            materialized.section_ssmd[section.id],
+            destination,
+            source=source,
+            force=force,
+        )
+        return destination
+
+    if source.is_dir():
+        workspace_root = source.resolve(strict=True)
+        if destination.resolve(strict=False).is_relative_to(workspace_root):
+            raise ValueError("bundle output must be outside the source workspace")
+        book = load_book_workspace(source).book
+    else:
+        book = load_book_bundle(source)
+    current_by_id = {chapter.id: chapter for chapter in book.chapters}
+    for section in analysis.sections:
+        chapter = current_by_id.get(section.id)
+        if chapter is None or chapter.ssmd != section.ssmd:
+            raise ValueError(
+                f"source chapter {section.id} changed during speech materialization; "
+                "no output was written"
+            )
+    updated_book = replace(
+        book,
+        chapters=tuple(
+            replace(chapter, ssmd=materialized.section_ssmd.get(chapter.id, chapter.ssmd))
+            for chapter in book.chapters
+        ),
+    )
+    selected_format = _book_output_format(destination, bundle_format)
+    return write_book_bundle(
+        updated_book,
+        destination,
+        format=selected_format,
+        overwrite=force,
+    )
+
+
+def _speech_audit_payload(report: Any) -> dict[str, Any]:
+    rendered = report_to_dict(report)
+    return {
+        "schema": "ssmdconvert.speech-audit.v1",
+        "analysis_id": report.analysis_id,
+        "source": rendered["source"],
+        "summary": rendered["summary"],
+        "changes": rendered["changes"],
+        "issues": rendered["issues"],
+    }
+
+
+def _render_speech_audit(payload: dict[str, Any]) -> str:
+    lines = [f"Speech audit: {payload['source']['path']}", ""]
+    for change in payload["changes"]:
+        section = f"{change['section_index']:04d} {change.get('section_title') or '(untitled)'}"
+        paragraph = "title" if change["is_title"] else str(change["paragraph_index"])
+        lines.append(
+            f"{section} / {paragraph}: {change['source']} -> {change['replacement']} "
+            f"[{change.get('rule') or 'no rule'}; {change['ssmd']['mapping_status']}]"
+        )
+    if not payload["changes"]:
+        lines.append("No automatic speech changes.")
+    if payload["issues"]:
+        lines.extend(["", "Issues:"])
+        lines.extend(
+            f"{item['severity']}: {item['code']}: {item['message']}" for item in payload["issues"]
+        )
+    return "\n".join(lines) + "\n"
+
+
 @app.command()  # type: ignore[untyped-decorator]
 def convert(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
@@ -233,6 +355,286 @@ def inspect(
             )
 
     _run_with_domain_errors(run)
+
+
+def _analyze_projection(
+    source: Path,
+    *,
+    chapters: str,
+    language: str | None,
+    sequence_fallback_mode: SequenceFallbackModeOption,
+    max_paragraph_chars: int,
+    include_titles: bool,
+):
+    if max_paragraph_chars < 1:
+        raise ValueError("--max-paragraph-chars must be at least 1")
+    analysis = analyze_ssmd_source(
+        source,
+        chapters=chapters,
+        language=language,
+        sequence_fallback_mode=sequence_fallback_mode.value,
+        include_titles=include_titles,
+    )
+    projection = project_txt(
+        analysis,
+        max_paragraph_chars=max_paragraph_chars,
+        include_titles=include_titles,
+    )
+    return analysis, projection
+
+
+def _report_format(
+    output: Path | None, requested: Literal["md", "json"] | None
+) -> Literal["md", "json"]:
+    if requested is not None:
+        return requested
+    suffix = output.suffix.lower() if output is not None else ".md"
+    if suffix == ".md":
+        return "md"
+    if suffix == ".json":
+        return "json"
+    raise ValueError("cannot infer report format; use a .md/.json output path or --format md|json")
+
+
+@app.command("report")  # type: ignore[untyped-decorator]
+def report(
+    source: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    chapters: Annotated[str, typer.Option("--chapters", "-c")] = "all",
+    language: Annotated[str | None, typer.Option("--language", "-l")] = None,
+    sequence_fallback_mode: Annotated[
+        SequenceFallbackModeOption,
+        typer.Option("--sequence-fallback-mode"),
+    ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
+    max_paragraph_chars: Annotated[int, typer.Option("--max-paragraph-chars")] = 1000,
+    include_titles: Annotated[
+        bool,
+        typer.Option("--include-titles/--no-include-titles"),
+    ] = True,
+    output_format: Annotated[
+        Literal["md", "json"] | None,
+        typer.Option("--format"),
+    ] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    force: Annotated[bool, typer.Option("--force")] = False,
+    show_raw_spans: Annotated[bool, typer.Option("--show-raw-spans")] = False,
+    fail_on_warning: Annotated[bool, typer.Option("--fail-on-warning")] = False,
+    refresh: Annotated[bool, typer.Option("--refresh")] = False,
+) -> None:
+    """Report SSMD-aware preparation, source context, and TXT projection statistics."""
+
+    def run() -> None:
+        cached = analyze_with_cache(
+            source,
+            chapters=chapters,
+            language=language,
+            sequence_fallback_mode=sequence_fallback_mode.value,
+            include_titles=include_titles,
+            max_paragraph_chars=max_paragraph_chars,
+            refresh=refresh,
+        )
+        analysis_report = cached.report
+        selected_format = _report_format(output, output_format)
+        rendered = (
+            render_json_report(analysis_report)
+            if selected_format == "json"
+            else render_markdown_report(analysis_report, show_raw_spans=show_raw_spans)
+        )
+        if output is None:
+            typer.echo(rendered, nl=False)
+        else:
+            _write_text_atomically(rendered, output, source=source, force=force)
+            typer.echo(f"Wrote report: {_output_path(output)}", err=True)
+        if fail_on_warning and any(
+            issue.severity in {"warning", "error"} for issue in analysis_report.issues
+        ):
+            raise typer.Exit(code=1)
+
+    _run_with_domain_errors(run)
+
+
+@app.command("context")  # type: ignore[untyped-decorator]
+def context(
+    source: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    change_id: Annotated[str, typer.Argument()],
+    paragraph: Annotated[bool, typer.Option("--paragraph")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    bug_report: Annotated[bool, typer.Option("--bug-report")] = False,
+) -> None:
+    """Show source and spoken context for one cached generic change ID."""
+
+    def run() -> None:
+        result = lookup_context(
+            source,
+            change_id,
+            paragraph=paragraph,
+            bug_report=bug_report,
+        )
+        if json_output:
+            typer.echo(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+        else:
+            typer.echo(render_context(result, paragraph=paragraph), nl=False)
+
+    _run_with_domain_errors(run)
+
+
+@app.command("txt")  # type: ignore[untyped-decorator]
+def txt(
+    source: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    chapters: Annotated[str, typer.Option("--chapters", "-c")] = "all",
+    language: Annotated[str | None, typer.Option("--language", "-l")] = None,
+    sequence_fallback_mode: Annotated[
+        SequenceFallbackModeOption,
+        typer.Option("--sequence-fallback-mode"),
+    ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
+    max_paragraph_chars: Annotated[int, typer.Option("--max-paragraph-chars")] = 1000,
+    include_titles: Annotated[
+        bool,
+        typer.Option("--include-titles/--no-include-titles"),
+    ] = True,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Project SSMD into generic prepared plain text for downstream TTS."""
+
+    def run() -> None:
+        _analysis, projection = _analyze_projection(
+            source,
+            chapters=chapters,
+            language=language,
+            sequence_fallback_mode=sequence_fallback_mode,
+            max_paragraph_chars=max_paragraph_chars,
+            include_titles=include_titles,
+        )
+        if output is None:
+            typer.echo(projection.text, nl=False)
+        else:
+            _write_text_atomically(projection.text, output, source=source, force=force)
+            typer.echo(f"Wrote prepared text: {_output_path(output)}", err=True)
+
+    _run_with_domain_errors(run)
+
+
+@speech_app.command("audit")  # type: ignore[untyped-decorator]
+def speech_audit(
+    source: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    chapters: Annotated[str, typer.Option("--chapters", "-c")] = "all",
+    language: Annotated[str | None, typer.Option("--language", "-l")] = None,
+    sequence_fallback_mode: Annotated[
+        SequenceFallbackModeOption,
+        typer.Option("--sequence-fallback-mode"),
+    ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
+    include_titles: Annotated[
+        bool,
+        typer.Option("--include-titles/--no-include-titles"),
+    ] = True,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    fail_on_warning: Annotated[bool, typer.Option("--fail-on-warning")] = False,
+) -> None:
+    """Audit automatic speech changes using the shared SSMD analysis pipeline."""
+
+    def run() -> None:
+        report = audit_ssmd(
+            source,
+            chapters=chapters,
+            language=language,
+            sequence_fallback_mode=sequence_fallback_mode.value,
+            include_titles=include_titles,
+        )
+        payload = _speech_audit_payload(report)
+        if json_output:
+            typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False))
+        else:
+            typer.echo(_render_speech_audit(payload), nl=False)
+        if fail_on_warning and any(
+            issue["severity"] in {"warning", "error"} for issue in payload["issues"]
+        ):
+            raise typer.Exit(code=1)
+
+    _run_with_domain_errors(run)
+
+
+def _run_speech_materialization_command(
+    command: str,
+    source: Path,
+    output: Path,
+    *,
+    chapters: str,
+    language: str | None,
+    sequence_fallback_mode: SequenceFallbackModeOption,
+    force: bool,
+    bundle_format: str | None,
+) -> None:
+    def run() -> None:
+        destination = _speech_materialize_to_destination(
+            source,
+            output,
+            chapters=chapters,
+            language=language,
+            sequence_fallback_mode=sequence_fallback_mode,
+            force=force,
+            bundle_format=bundle_format,
+        )
+        typer.echo(f"Wrote {command} SSMD: {destination}")
+
+    _run_with_domain_errors(run)
+
+
+@speech_app.command("annotate")  # type: ignore[untyped-decorator]
+def speech_annotate(
+    source: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    output: Annotated[Path, typer.Option("--output", "-o")],
+    chapters: Annotated[str, typer.Option("--chapters", "-c")] = "all",
+    language: Annotated[str | None, typer.Option("--language", "-l")] = None,
+    sequence_fallback_mode: Annotated[
+        SequenceFallbackModeOption,
+        typer.Option("--sequence-fallback-mode"),
+    ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
+    bundle_format: Annotated[
+        Literal["directory", "zip"] | None,
+        typer.Option("--format"),
+    ] = None,
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Write selected automatic speech decisions as SSMD substitutions."""
+    _run_speech_materialization_command(
+        "annotated",
+        source,
+        output,
+        chapters=chapters,
+        language=language,
+        sequence_fallback_mode=sequence_fallback_mode,
+        force=force,
+        bundle_format=bundle_format,
+    )
+
+
+@speech_app.command("freeze")  # type: ignore[untyped-decorator]
+def speech_freeze(
+    source: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    output: Annotated[Path, typer.Option("--output", "-o")],
+    chapters: Annotated[str, typer.Option("--chapters", "-c")] = "all",
+    language: Annotated[str | None, typer.Option("--language", "-l")] = None,
+    sequence_fallback_mode: Annotated[
+        SequenceFallbackModeOption,
+        typer.Option("--sequence-fallback-mode"),
+    ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
+    bundle_format: Annotated[
+        Literal["directory", "zip"] | None,
+        typer.Option("--format"),
+    ] = None,
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Freeze selected automatic speech decisions into explicit SSMD semantics."""
+    _run_speech_materialization_command(
+        "frozen",
+        source,
+        output,
+        chapters=chapters,
+        language=language,
+        sequence_fallback_mode=sequence_fallback_mode,
+        force=force,
+        bundle_format=bundle_format,
+    )
 
 
 @book_app.command("inspect")  # type: ignore[untyped-decorator]

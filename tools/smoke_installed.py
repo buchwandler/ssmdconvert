@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -52,15 +53,32 @@ def _write_epub(path: Path) -> None:
 
 
 def _run(workdir: Path, *arguments: str) -> str:
+    environment = os.environ.copy()
+    environment["XDG_CACHE_HOME"] = str(workdir / ".cache")
     result = subprocess.run(
         [sys.executable, "-m", "ssmdconvert", *arguments],
         cwd=workdir,
         capture_output=True,
         text=True,
+        env=environment,
     )
     if result.returncode:
         command = " ".join(arguments)
         raise RuntimeError(f"command failed: {command}\n{result.stdout}{result.stderr}")
+    return result.stdout
+
+
+def _console_help() -> str:
+    executable = Path(sys.executable).with_name("ssmdconvert")
+    if os.name == "nt":
+        executable = executable.with_suffix(".exe")
+    result = subprocess.run(
+        [str(executable), "--help"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode:
+        raise RuntimeError(f"installed console entry point failed: {result.stderr}")
     return result.stdout
 
 
@@ -72,7 +90,11 @@ def main() -> None:
             f"smoke test imported the source tree instead of an installed package: {package_path}"
         )
     if "ssmdconvert.speech" in sys.modules or "spokenform" in sys.modules:
-        raise RuntimeError("base package import loaded the optional speech extra")
+        raise RuntimeError("core package import eagerly loaded speech internals")
+
+    entrypoint_help = _console_help()
+    if not all(command in entrypoint_help for command in ("report", "context", "txt", "speech")):
+        raise RuntimeError("installed ssmdconvert entry point is missing analysis commands")
 
     with tempfile.TemporaryDirectory(prefix="ssmdconvert-smoke-") as temporary_dir:
         workdir = Path(temporary_dir)
@@ -100,6 +122,29 @@ def main() -> None:
         validation = json.loads(_run(workdir, "book", "validate", str(bundle), "--json"))
         if not validation["valid"]:
             raise RuntimeError("installed bundle validation failed")
+        ssmd_source = workdir / "sample.ssmd"
+        ssmd_source.write_text(
+            '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nMeasure 5 kg.\n',
+            encoding="utf-8",
+        )
+        report = json.loads(_run(workdir, "report", str(ssmd_source), "--format", "json"))
+        if report.get("schema") != "ssmdconvert.report.v1" or not report.get("changes"):
+            raise RuntimeError("installed report command returned an unexpected result")
+        change_id = report["changes"][0]["id"]
+        context = json.loads(_run(workdir, "context", str(ssmd_source), change_id, "--json"))
+        if context["change"]["id"] != change_id:
+            raise RuntimeError("installed context command returned an unexpected result")
+        if "five kilograms" not in _run(workdir, "txt", str(ssmd_source)):
+            raise RuntimeError("installed TXT command omitted prepared speech text")
+        audit = json.loads(_run(workdir, "speech", "audit", str(ssmd_source), "--json"))
+        if audit.get("schema") != "ssmdconvert.speech-audit.v1":
+            raise RuntimeError("installed speech audit returned an unexpected result")
+        annotated = workdir / "annotated.ssmd"
+        frozen = workdir / "frozen.ssmd"
+        _run(workdir, "speech", "annotate", str(ssmd_source), "-o", str(annotated))
+        _run(workdir, "speech", "freeze", str(annotated), "-o", str(frozen))
+        if frozen.read_bytes() != annotated.read_bytes():
+            raise RuntimeError("installed freeze command was not idempotent")
 
     print(f"Installed ssmdconvert {ssmdconvert.__version__} smoke test passed")
 

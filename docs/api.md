@@ -137,44 +137,17 @@ The writer requires `format="directory"` or `format="zip"`. Existing destination
 
 ```
 
-## Optional speech preparation
+## SSMD analysis and speech workflows
 
-Install the `[speech]` extra before importing `ssmdconvert.speech`. These APIs are separate from core conversion and do not alter conversion output unless called explicitly.
+SSMD report, context lookup, TXT projection, speech audit, annotation, and freeze are
+user-facing CLI workflows. The former optional `SpeechPreparationOptions` /
+`prepare_ssmd_for_speech` engine and its direct `spokenform` runtime dependency have
+been removed; `ttsready>=0.2,<0.3` supplies generic preparation through its public
+Python API.
 
-`SpeechPreparationOptions.sequence_fallback_mode` uses the same `spell` or `preserve` values and defaults to `preserve`, derived from the shared policy constant.
-
-```python
-from ssmdconvert.speech import SpeechPreparationOptions, prepare_ssmd_for_speech
-
-result = prepare_ssmd_for_speech(
-    source_ssmd,
-    options=SpeechPreparationOptions(mode="annotate", language="en"),
-)
-```
-
-```{autoclass} ssmdconvert.speech.SpeechPreparationOptions
-:members:
-```
-
-```{autoclass} ssmdconvert.speech.SpeechPreparationResult
-:members:
-```
-
-```{autoclass} ssmdconvert.speech.SpeechPreparationReport
-:members:
-```
-
-```{autoclass} ssmdconvert.speech.SpeechChange
-:members:
-```
-
-```{autoclass} ssmdconvert.speech.SpeechIssue
-:members:
-```
-
-```{autofunction} ssmdconvert.speech.prepare_ssmd_for_speech
-
-```
+See [SSMD analysis and speech workflows](analysis-workflows.md) for command usage,
+cache ownership, source mapping, safe write-back, and migration from the removed
+`ttsready` CLI.
 
 ## Version
 

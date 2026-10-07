@@ -41,6 +41,10 @@ def test_subset_bundle_source_numbers_are_not_renumbered() -> None:
         parse_chapter_selection("2-4", available_numbers=available)
 
 
+def test_manifest_order_is_preserved_when_available_numbers_are_not_sorted() -> None:
+    assert parse_chapter_selection("2,4-5", available_numbers=(5, 2, 4)) == (5, 2, 4)
+
+
 @pytest.mark.parametrize(
     "spec",
     ["", "1,,2", "chapter one", "0", "-1", "4-2", "1-3"],

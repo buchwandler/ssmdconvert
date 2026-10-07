@@ -646,6 +646,80 @@ def load_book_bundle(source: str | Path) -> Book:
     _invalid(str(path), "bundle is not a regular file or directory")
 
 
+def read_current_chapter_bytes(source: str | Path, chapter_id: str) -> bytes:
+    """Read only one chapter's current bytes for affected-chapter freshness checks."""
+    path = Path(source).expanduser().resolve(strict=True)
+    display = str(path)
+    if path.is_dir():
+        manifest_bytes = _read_directory_file(
+            path,
+            "manifest.json",
+            display,
+            max_bytes=_MAX_MANIFEST_BYTES,
+        )
+        manifest = _parse_manifest(manifest_bytes, display)
+        entry = next((item for item in manifest["chapters"] if item["id"] == chapter_id), None)
+        if entry is None:
+            _invalid(display, f"chapter {chapter_id!r} is not present in the workspace")
+        return _read_directory_file(
+            path,
+            entry["path"],
+            display,
+            max_bytes=_MAX_CHAPTER_BYTES,
+        )
+
+    if not path.is_file():
+        _invalid(display, "source is not a regular file or workspace directory")
+    if path.name.lower().endswith((".ssmd", ".ssmd.md")):
+        if chapter_id != "document-0001":
+            _invalid(display, f"chapter {chapter_id!r} is not present in the SSMD document")
+        try:
+            if path.stat().st_size > _MAX_CHAPTER_BYTES:
+                _invalid(display, "SSMD document exceeds the size limit")
+            return path.read_bytes()
+        except OSError as exc:
+            _invalid(display, f"could not read SSMD document: {exc}")
+
+    try:
+        archive = zipfile.ZipFile(path, "r")
+    except (OSError, zipfile.BadZipFile) as exc:
+        _invalid(display, f"not a readable book ZIP: {exc}")
+    with archive:
+        infos = archive.infolist()
+        if len(infos) > _MAX_ARCHIVE_MEMBERS:
+            _invalid(display, "ZIP contains too many archive members")
+        names = [info.filename for info in infos]
+        if len(names) != len(set(names)):
+            _invalid(display, "ZIP contains duplicate member names")
+        for info in infos:
+            _validate_zip_member(info, display)
+        members = {info.filename: info for info in infos}
+        manifest_info = members.get("manifest.json")
+        if manifest_info is None or manifest_info.is_dir():
+            _invalid(display, "ZIP is missing manifest.json")
+        if manifest_info.file_size > _MAX_MANIFEST_BYTES:
+            _invalid(display, "ZIP manifest.json exceeds the size limit")
+        try:
+            manifest = _parse_manifest(archive.read(manifest_info), display)
+        except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
+            _invalid(display, f"could not read ZIP manifest.json: {exc}")
+        entry = next((item for item in manifest["chapters"] if item["id"] == chapter_id), None)
+        if entry is None:
+            _invalid(display, f"chapter {chapter_id!r} is not present in the bundle")
+        chapter_info = members.get(entry["path"])
+        if chapter_info is None or chapter_info.is_dir():
+            _invalid(display, f"ZIP is missing chapter file {entry['path']!r}")
+        if chapter_info.file_size > _MAX_CHAPTER_BYTES:
+            _invalid(display, f"ZIP chapter {entry['path']!r} exceeds the size limit")
+        try:
+            data = archive.read(chapter_info)
+        except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
+            _invalid(display, f"could not read ZIP chapter {entry['path']!r}: {exc}")
+        if len(data) > _MAX_CHAPTER_BYTES:
+            _invalid(display, f"ZIP chapter {entry['path']!r} exceeds the size limit")
+        return data
+
+
 def validate_book_bundle(source: str | Path) -> None:
     """Validate a book bundle using the same strict loader as deserialization."""
     load_book_bundle(source)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -48,7 +49,7 @@ def test_enrichment_is_not_a_cli_command() -> None:
 
 def test_real_command_groups_and_subcommand_help() -> None:
     expected_commands = {
-        ("--help",): ("convert", "inspect", "book"),
+        ("--help",): ("convert", "inspect", "report", "context", "txt", "book", "speech"),
         ("convert", "--help"): (
             "--force",
             "-l, --language",
@@ -56,6 +57,28 @@ def test_real_command_groups_and_subcommand_help() -> None:
             "--output",
             "--sequence-fallback-mode",
         ),
+        ("report", "--help"): (
+            "--chapters",
+            "--language",
+            "--max-paragraph-chars",
+            "--include-titles",
+            "--format",
+            "--output",
+            "--fail-on-warning",
+            "--refresh",
+        ),
+        ("context", "--help"): ("--paragraph", "--json", "--bug-report"),
+        ("txt", "--help"): (
+            "--chapters",
+            "--language",
+            "--max-paragraph-chars",
+            "--include-titles",
+            "--output",
+        ),
+        ("speech", "--help"): ("audit", "annotate", "freeze"),
+        ("speech", "audit", "--help"): ("--chapters", "--language", "--json", "--fail-on-warning"),
+        ("speech", "annotate", "--help"): ("--output", "--chapters", "--format", "--force"),
+        ("speech", "freeze", "--help"): ("--output", "--chapters", "--format", "--force"),
         ("book", "--help"): ("inspect", "convert", "validate", "metadata"),
         ("book", "inspect", "--help"): ("--json",),
         ("book", "convert", "--help"): (
@@ -403,3 +426,97 @@ def test_convert_rejects_invalid_ssmd_metadata_shape_from_file(tmp_path: Path) -
 
     assert result.exit_code == 1
     assert "voice_defaults" in result.output
+
+
+def test_report_and_txt_cli_share_exact_projection_and_atomic_output(tmp_path: Path) -> None:
+    source = tmp_path / "book.ssmd"
+    source.write_text(
+        '---\nssmd_version: "0.9"\ntitle: Sample\nlanguage: en-US\n---\nMeasure 5 kg.\n',
+        encoding="utf-8",
+    )
+    arguments = [str(source), "--no-include-titles", "--max-paragraph-chars", "100"]
+
+    text_result = runner.invoke(app, ["txt", *arguments])
+    assert text_result.exit_code == 0, text_result.output
+    projected_text = text_result.output
+
+    report_result = runner.invoke(app, ["report", *arguments, "--format", "json"])
+    assert report_result.exit_code == 0, report_result.output
+    payload = json.loads(report_result.output)
+    expected_hash = hashlib.sha256(projected_text.encode("utf-8")).hexdigest()
+    assert payload["projection"]["prepared_output_sha256"] == expected_hash
+    assert payload["projection"]["output_chars"] == len(projected_text)
+    assert payload["configuration"]["include_titles"] is False
+
+    output = tmp_path / "prepared.txt"
+    written = runner.invoke(app, ["txt", *arguments, "--output", str(output)])
+    assert written.exit_code == 0, written.output
+    assert output.read_text(encoding="utf-8") == projected_text
+
+
+def test_report_infers_json_and_fail_on_warning_keeps_rendered_findings(tmp_path: Path) -> None:
+    source = tmp_path / "unresolved.ssmd"
+    source.write_text(
+        '---\nssmd_version: "0.9"\ntitle: Missing language\n---\nNo language.\n', encoding="utf-8"
+    )
+    output = tmp_path / "report.json"
+
+    result = runner.invoke(
+        app,
+        ["report", str(source), "--output", str(output), "--fail-on-warning"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["schema"] == "ssmdconvert.report.v1"
+    assert any(issue["code"] == "analysis.language_unresolved" for issue in payload["issues"])
+
+
+def test_report_cache_context_cli_refresh_and_stale_diagnostics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache-home"))
+    source = tmp_path / "sample.ssmd"
+    source.write_text(
+        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nMeasure 5 kg.\n',
+        encoding="utf-8",
+    )
+
+    first_report = runner.invoke(app, ["report", str(source), "--format", "json"])
+    assert first_report.exit_code == 0, first_report.output
+    first_payload = json.loads(first_report.output)
+    first_change_id = first_payload["changes"][0]["id"]
+
+    context_result = runner.invoke(app, ["context", str(source), first_change_id, "--json"])
+    assert context_result.exit_code == 0, context_result.output
+    context_payload = json.loads(context_result.output)
+    assert context_payload["change"]["id"] == first_change_id
+    assert context_payload["source_sentence"] == "Measure 5 kg."
+    assert context_payload["spoken_sentence"] == "Measure five kilograms."
+
+    paragraph = runner.invoke(
+        app, ["context", str(source), first_change_id, "--paragraph", "--json", "--bug-report"]
+    )
+    assert paragraph.exit_code == 0, paragraph.output
+    paragraph_payload = json.loads(paragraph.output)
+    assert paragraph_payload["context_kind"] == "paragraph"
+    assert paragraph_payload["bug_report"]["prepared_fingerprint"]
+
+    source.write_text(
+        '---\nssmd_version: "0.9"\nlanguage: en-US\n---\nMeasure 6 kg.\n',
+        encoding="utf-8",
+    )
+    second_report = runner.invoke(app, ["report", str(source), "--format", "json"])
+    assert second_report.exit_code == 0, second_report.output
+    second_payload = json.loads(second_report.output)
+    assert second_payload["analysis_id"] != first_payload["analysis_id"]
+
+    stale = runner.invoke(app, ["context", str(source), first_change_id])
+    assert stale.exit_code == 1
+    assert "Analysis cache is stale for document-0001" in stale.output
+    assert "ssmdconvert report" in stale.output
+
+    refreshed = runner.invoke(app, ["report", str(source), "--format", "json", "--refresh"])
+    assert refreshed.exit_code == 0, refreshed.output
+    refreshed_payload = json.loads(refreshed.output)
+    assert refreshed_payload["analysis_id"] == second_payload["analysis_id"]

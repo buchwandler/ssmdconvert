@@ -19,7 +19,7 @@ def parse_chapter_selection(
     combinations such as ``1,3-5``. Unavailable or malformed selections raise
     :class:`ChapterSelectionError`.
     """
-    available = tuple(sorted(set(available_numbers)))
+    available = tuple(dict.fromkeys(available_numbers))
     available_set = set(available)
 
     if spec is None or spec.strip().lower() == "all":

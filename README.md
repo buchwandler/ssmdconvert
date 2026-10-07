@@ -4,7 +4,23 @@
 
 ## SSMD ownership boundary
 
-`ssmdconvert` owns source ingestion, canonical SSMD conversion, chapter identity, and `.ssmdbook` integrity. A directory `.ssmdbook/` is the editable canonical workspace; `.ssmdbook.zip` is an immutable portable artifact. `ttsready` is a separate downstream workflow that reads canonical SSMD, analyzes and reviews speech semantics, and writes approved changes into SSMD. Applications exchange reviewed content through SSMD documents or book bundles, not through a runtime dependency on `ttsready`. Existing optional `ssmdconvert.speech` APIs remain available for compatibility and are not required by `ttsready`.
+`ssmdconvert` owns source ingestion, canonical SSMD conversion, chapter identity,
+`.ssmdbook` integrity, SSMD analysis/reporting, and safe write-back. A directory
+`.ssmdbook/` is the editable canonical workspace; `.ssmdbook.zip` is an immutable
+portable artifact.
+
+Conceptually, the layers are:
+
+```text
+spokenform → ttsready → ssmdconvert
+```
+
+`spokenform` handles linguistic normalization; `ttsready` supplies generic
+preparation and QA through its public Python API; `ssmdconvert` owns the SSMD
+application semantics and user-facing workflows. `ssmdconvert` depends directly
+on `ttsready`, not on `spokenform`. Reports, context, TXT projection, and speech
+audit/annotate/freeze share one analysis pipeline. The `ttsready` CLI is not used
+or re-exported.
 
 ## Install
 
@@ -12,16 +28,19 @@
 python -m pip install ssmdconvert
 ```
 
-The base install supports text, Markdown, HTML, EPUB, and SSMD. Optional adapters and local speech-preparation APIs are installed separately:
+The base install supports text, Markdown, HTML, EPUB, SSMD analysis, and speech
+audit/annotation. `ttsready>=0.2,<0.3` is installed as a core dependency; only PDF
+and DOCX adapters are optional:
 
 ```bash
 python -m pip install "ssmdconvert[pdf]"
 python -m pip install "ssmdconvert[docx]"
-python -m pip install "ssmdconvert[speech]"
 python -m pip install "ssmdconvert[all]"
 ```
 
-Python 3.10 or newer is required. Conversion and EPUB extraction run locally. Speech preparation is an optional API and is not part of normal conversion.
+Python 3.10 or newer is required. Conversion, analysis, and EPUB extraction run
+locally. Speech preparation commands operate on SSMD and are separate from document
+conversion.
 
 ## Convert a document
 
@@ -72,6 +91,24 @@ ssmdconvert book pack novel.ssmdbook -o novel.ssmdbook.zip
 
 Readio can consume the public `load_book_workspace()` API directly. Neither loading nor metadata inspection automatically refreshes the manifest or adds Readio-specific manifest fields.
 
+## SSMD analysis and speech workflows
+
+```bash
+ssmdconvert report novel.ssmdbook.zip --chapters 2-20
+ssmdconvert context novel.ssmdbook.zip chg:v1:0123456789abcdef0123456789abcdef
+ssmdconvert txt novel.ssmdbook.zip -o prepared.txt
+ssmdconvert speech audit novel.ssmdbook.zip --json
+ssmdconvert speech annotate chapter.ssmd -o annotated.ssmd
+ssmdconvert speech freeze novel.ssmdbook.zip -o frozen.ssmdbook.zip
+```
+
+Reports, context lookup, TXT projection, and speech audit/annotate/freeze use one
+SSMD-aware analysis pipeline backed by the public `ttsready` Python API. Speech
+write-back preserves visible text, requires a new destination by default, and
+never modifies a directory workspace in place. Cache details, safe write policy,
+all command options, and migration from the removed `ttsready` CLI are in the
+[analysis workflow guide](docs/analysis-workflows.md).
+
 ## Python API
 
 ```python
@@ -90,9 +127,7 @@ from ssmdconvert import (
 )
 
 result = convert("manuscript.md")
-content = convert_content(
-    "# Notes\n\nRead this.", input_format="markdown", source_name="notes.md"
-)
+content = convert_content("# Notes\n\nRead this.", input_format="markdown", source_name="notes.md")
 inspection = inspect_book("novel.epub")
 book = convert_book(
     "novel.epub",

@@ -26,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "ssmd>=0.9.3,<0.10",
+  "ttsready>=0.2,<0.3",
   "epub2text>=0.2.8,<0.3",
   "markdown-it-py>=3.0,<5.0",
   "mdit-py-plugins>=0.4,<1.0",
@@ -35,11 +36,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-speech = ["spokenform>=0.4.3,<0.5"]
 pdf = ["pypdf>=5,<7"]
 docx = ["python-docx>=1.1,<2"]
 all = [
-  "spokenform>=0.4.3,<0.5",
   "pypdf>=5,<7",
   "python-docx>=1.1,<2",
 ]
@@ -85,6 +84,22 @@ pythonpath = ["."]
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+extend-exclude = ["02_ssmdconvert_ttsready_report_context_detailed_implementation_brief.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+
+# Adapter libraries are runtime dependencies but do not all ship PEP 561 typing metadata.
+[[tool.mypy.overrides]]
+module = [
+    "ttsready",
+    "ttsready.*",
+    "ssmd",
+    "ssmd.*",
+    "epub2text",
+    "epub2text.*",
+    "yaml",
+    "yaml.*",
+]
+ignore_missing_imports = true

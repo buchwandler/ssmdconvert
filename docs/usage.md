@@ -75,6 +75,21 @@ Book output format is inferred only from `.ssmdbook` (directory) and `.ssmdbook.
 
 Use `ssmdconvert book metadata BUNDLE` to display validated metadata stored in either a directory or ZIP bundle. Add `--json` for a deterministic `{"metadata": ...}` object. The human form labels absent known values as `not set` and renders nested values indented.
 
+## SSMD analysis and speech commands
+
+Use the shared SSMD-aware analysis commands for reports, context lookup, prepared TXT, and speech write-back:
+
+```bash
+ssmdconvert report SOURCE [--chapters SELECTOR] [--format md|json] [--refresh]
+ssmdconvert context SOURCE CHANGE_ID [--paragraph] [--json]
+ssmdconvert txt SOURCE [--chapters SELECTOR] [-o OUTPUT]
+ssmdconvert speech audit SOURCE [--json]
+ssmdconvert speech annotate SOURCE -o OUTPUT
+ssmdconvert speech freeze SOURCE -o OUTPUT
+```
+
+The commands accept standalone SSMD, validated ZIP bundles, and directory workspaces. Reports and TXT share a projection; `context` resolves a generic change ID from a report cache. `speech audit` is read-only. Annotation and freeze write to a new destination by default, preserve visible text, and refuse to modify a source workspace in place. Existing output requires `--force`; the input cannot be overwritten. See [SSMD analysis and speech workflows](analysis-workflows.md) for language handling, cache freshness, workspace policy, and migration from the removed `ttsready` CLI.
+
 ## Help
 
 ```bash
@@ -86,4 +101,11 @@ ssmdconvert book inspect --help
 ssmdconvert book convert --help
 ssmdconvert book validate --help
 ssmdconvert book metadata --help
+ssmdconvert report --help
+ssmdconvert context --help
+ssmdconvert txt --help
+ssmdconvert speech --help
+ssmdconvert speech audit --help
+ssmdconvert speech annotate --help
+ssmdconvert speech freeze --help
 ```
