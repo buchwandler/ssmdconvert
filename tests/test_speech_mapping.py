@@ -251,3 +251,26 @@ def test_synthetic_title_changes_have_no_fabricated_source_offsets(tmp_path: Pat
     assert all(
         item.raw_source_start is None and item.raw_source_end is None for item in title_changes
     )
+
+
+def test_materialization_uses_existing_ssmd_attribute_escaping(tmp_path: Path) -> None:
+    source_path = tmp_path / "escaping.ssmd"
+    source = _document("Measure 5 kg.")
+    source_path.write_text(source, encoding="utf-8")
+    analysis = analyze_ssmd_source(source_path)
+    mapped = map_analysis_changes(analysis)
+    target = next(item for item in mapped if item.change.source == "5 kg")
+    custom = replace(
+        target,
+        change=replace(target.change, replacement='say "five" [kg] {unit} \\'),
+    )
+    section = analysis.sections[0]
+
+    result = materialize_substitutions(
+        section.ssmd,
+        analysis.structures[section.id],
+        (custom,),
+    )
+
+    assert r'[5 kg]{sub="say \"five\" \[kg\] \{unit\} \\"}' in result.ssmd
+    assert _structure(result.ssmd).clean_text == _structure(source).clean_text

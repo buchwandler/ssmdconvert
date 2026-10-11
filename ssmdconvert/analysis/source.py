@@ -13,7 +13,12 @@ from ..errors import AnalysisSourceError
 from ..models import Book, BookWorkspace
 from ..render import validate_ssmd_document
 from .fingerprints import content_fingerprint, sha256_bytes, sha256_file
-from .models import LoadedSsmdSection, LoadedSsmdSource
+from .models import (
+    LoadedSsmdSection,
+    LoadedSsmdSource,
+    WorkspaceStatus,
+    WorkspaceType,
+)
 
 
 def _title(metadata: dict[str, Any]) -> str | None:
@@ -26,16 +31,17 @@ def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def _book_source(
-    path: Path,
+def loaded_source_from_book(
     book: Book,
     *,
-    workspace_type: str,
-    workspace_status: str,
+    path: Path,
+    workspace_type: WorkspaceType,
+    workspace_status: WorkspaceStatus,
     dirty_chapters: tuple[str, ...] = (),
     artifact_sha256: str | None = None,
     chapter_hashes: Mapping[str, str] | None = None,
 ) -> LoadedSsmdSource:
+    """Adapt an in-memory book to the canonical SSMD analysis source model."""
     metadata = dict(book.metadata)
     sections: list[LoadedSsmdSection] = []
     hashes: list[tuple[str, str]] = []
@@ -67,8 +73,8 @@ def _book_source(
         sections=tuple(sections),
         source_sha256=artifact_sha256 or book.source_sha256,
         content_fingerprint=content_fingerprint(hashes, metadata),
-        workspace_type=workspace_type,  # type: ignore[arg-type]
-        workspace_status=workspace_status,  # type: ignore[arg-type]
+        workspace_type=workspace_type,
+        workspace_status=workspace_status,
         dirty_chapters=dirty_chapters,
     )
 
@@ -90,9 +96,9 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
             raise AnalysisSourceError(f"could not load SSMD book workspace {path}: {exc}") from exc
         dirty = tuple(chapter.id for chapter in workspace.chapters if chapter.dirty)
         chapter_hashes = {chapter.id: chapter.actual_sha256 for chapter in workspace.chapters}
-        return _book_source(
-            path,
+        return loaded_source_from_book(
             workspace.book,
+            path=path,
             workspace_type="directory",
             workspace_status="dirty" if workspace.dirty else "clean",
             dirty_chapters=dirty,
@@ -110,9 +116,9 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
             book = load_book_bundle(path)
         except Exception as exc:
             raise AnalysisSourceError(f"could not load SSMD book bundle {path}: {exc}") from exc
-        return _book_source(
-            path,
+        return loaded_source_from_book(
             book,
+            path=path,
             workspace_type="zip",
             workspace_status="valid",
             artifact_sha256=sha256_file(path),

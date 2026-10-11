@@ -14,6 +14,7 @@ def make_epub(
     include_empty_spine_item: bool = False,
     chapter_one_suffix: str = "",
     language: str | None = "en",
+    chapter_language: str | None = "en",
 ) -> None:
     book = epub.EpubBook()
     book.set_identifier("demo-id")
@@ -23,7 +24,7 @@ def make_epub(
     book.add_author("A. Author")
     book.add_metadata("DC", "publisher", "Demo Press")
 
-    chapter_one = epub.EpubHtml(title="One", file_name="c1.xhtml", lang="en")
+    chapter_one = epub.EpubHtml(title="One", file_name="c1.xhtml", lang=chapter_language)
     chapter_one.content = (
         "<html><head><style>.italic { font-style: italic; }</style></head>"
         "<body><h1>One</h1><h2>Opening</h2>"
@@ -35,7 +36,7 @@ def make_epub(
     chapter_two = epub.EpubHtml(
         title="One" if duplicate_visible_titles else "Two",
         file_name="c2.xhtml",
-        lang="en",
+        lang=chapter_language,
     )
     chapter_two.content = "<html><body><h1>Two</h1><p>World.</p></body></html>"
     book.add_item(chapter_one)

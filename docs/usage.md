@@ -64,12 +64,14 @@ The book CLI uses explicit subcommands:
 
 ```bash
 ssmdconvert book inspect novel.epub [--json]
-ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve]
+ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve] [--speech-semantics freeze|preserve]
 ssmdconvert book validate BUNDLE [--json]
 ssmdconvert book metadata BUNDLE [--json]
 ```
 
 Selectors use original 1-based source chapter numbers. They accept a single number, a range, a comma-separated list, or a mixture such as `1,3-5`. Selected chapters remain in original source order.
+
+Book conversion defaults to `--speech-semantics freeze`, using upstream speech decisions to add exact SSMD `sub` annotations without changing visible text. Freeze requires a resolvable language; provide `-l/--language` or select `--speech-semantics preserve` for structural-only output. Existing author-owned speech annotations remain authoritative.
 
 Book output format is inferred only from `.ssmdbook` (directory) and `.ssmdbook.zip` (ZIP). For other names, specify `--format directory` or `--format zip`. Existing bundles are refused unless `--force` is supplied. A forced directory output replaces the complete previous directory; stale files are not merged into the new bundle.
 

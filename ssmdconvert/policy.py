@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 SequenceFallbackMode = Literal["preserve", "spell"]
+SpeechSemanticsMode = Literal["freeze", "preserve"]
 DEFAULT_SEQUENCE_FALLBACK_MODE: SequenceFallbackMode = "preserve"
 
 

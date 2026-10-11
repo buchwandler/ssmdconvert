@@ -8,6 +8,8 @@ ssmdconvert speech freeze chapter.ssmd -o frozen.ssmd
 ssmdconvert speech freeze BOOK.ssmdbook.zip --chapters 2-4 -o frozen.ssmdbook.zip
 ```
 
+Fresh EPUB conversion applies this freeze automatically: `ssmdconvert book convert novel.epub -o novel.ssmdbook`. Use `--speech-semantics preserve` to request the historical structural-only result. The conversion-time aliases come from `ttsready`/`spokenform`, do not alter visible source text, and do not override author-owned annotations. A resolvable language is required for freeze; pass `--language` or use preserve when none is available.
+
 `freeze` uses the same fail-closed mapping, validation, and atomic writer as
 [`speech annotate`](speech-annotations.md). It preserves visible text, does not
 duplicate authoritative SSMD substitutions, refuses unresolved effective

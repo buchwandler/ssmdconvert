@@ -9,6 +9,7 @@ import pytest
 from ssmdconvert import Book, BookChapter, SourceInfo, write_book_bundle
 from ssmdconvert.analysis import load_ssmd_source, select_sections
 from ssmdconvert.analysis.fingerprints import content_fingerprint, sha256_file
+from ssmdconvert.analysis.source import loaded_source_from_book
 from ssmdconvert.errors import AnalysisSourceError
 
 
@@ -176,3 +177,23 @@ def test_invalid_chapter_ssmd_is_rejected_for_workspace(tmp_path: Path) -> None:
 
     with pytest.raises(AnalysisSourceError, match="not valid SSMD 0.9"):
         load_ssmd_source(workspace)
+
+
+def test_loaded_source_from_book_supports_conversion_time_books(tmp_path: Path) -> None:
+    book = _book()
+    path = tmp_path / "in-memory.epub"
+
+    source = loaded_source_from_book(
+        book,
+        path=path,
+        workspace_type="generated",
+        workspace_status="clean",
+    )
+
+    assert source.path == path
+    assert source.kind == "ssmdbook"
+    assert source.workspace_type == "generated"
+    assert source.workspace_status == "clean"
+    assert [section.id for section in source.sections] == ["chapter-0005", "chapter-0002"]
+    assert [section.source_number for section in source.sections] == [5, 2]
+    assert source.sections[0].ssmd == book.chapters[0].ssmd

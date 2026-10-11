@@ -34,7 +34,7 @@ from .cli_help import AdaptiveTyper, AdaptiveTyperGroup
 from .converter import Converter
 from .errors import SSMDConvertError
 from .metadata import load_metadata_file
-from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE
+from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SpeechSemanticsMode
 from .speech.audit import audit_ssmd
 from .speech.workflows import materialize_analysis
 
@@ -805,6 +805,13 @@ def book_convert(
         SequenceFallbackModeOption,
         typer.Option("--sequence-fallback-mode"),
     ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
+    speech_semantics: Annotated[
+        SpeechSemanticsMode,
+        typer.Option(
+            "--speech-semantics",
+            help="Freeze safe automatic speech decisions or preserve structural-only SSMD.",
+        ),
+    ] = "freeze",
     bundle_format: Annotated[str | None, typer.Option("--format")] = None,
     force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
 ) -> None:
@@ -819,6 +826,7 @@ def book_convert(
                 load_metadata_file(metadata_file) if metadata_file is not None else None
             ),
             sequence_fallback_mode=sequence_fallback_mode.value,
+            speech_semantics=speech_semantics,
         )
         destination = output or source.with_suffix(".ssmdbook")
         _reject_input_overwrite(source, _output_path(destination))

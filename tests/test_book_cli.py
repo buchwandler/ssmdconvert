@@ -157,6 +157,8 @@ def test_book_metadata_displays_directory_and_zip_metadata(tmp_path: Path) -> No
                 "book",
                 "convert",
                 str(source),
+                "--speech-semantics",
+                "preserve",
                 "--metadata-file",
                 str(metadata_file),
                 "--output",
@@ -302,3 +304,69 @@ def test_book_pack_packs_dirty_workspace_without_readio_or_source_mutation(tmp_p
         ]
         assert not any(name.startswith(".readio/") for name in zip_file.namelist())
         assert zip_file.read(chapter_entry["path"]).decode("utf-8") == edited_text
+
+
+def test_book_convert_freezes_by_default_and_supports_preserve_mode(tmp_path: Path) -> None:
+    source = tmp_path / "speech.epub"
+    make_epub(source, chapter_one_suffix=" Initiate in 3–2–1.")
+    frozen_path = tmp_path / "frozen.ssmdbook"
+    preserved_path = tmp_path / "preserved.ssmdbook"
+
+    frozen_result = runner.invoke(
+        app, ["book", "convert", str(source), "--output", str(frozen_path)]
+    )
+    assert frozen_result.exit_code == 0, frozen_result.output
+    frozen = load_book_bundle(frozen_path)
+    frozen_chapter = frozen.chapters[0]
+    assert '[3–2–1]{sub="three - two - one"}' in frozen_chapter.ssmd
+    assert frozen_chapter.id == "chapter-0001"
+
+    preserved_result = runner.invoke(
+        app,
+        [
+            "book",
+            "convert",
+            str(source),
+            "--speech-semantics",
+            "preserve",
+            "--output",
+            str(preserved_path),
+        ],
+    )
+    assert preserved_result.exit_code == 0, preserved_result.output
+    preserved = load_book_bundle(preserved_path)
+    assert "{sub=" not in preserved.chapters[0].ssmd
+    assert (
+        parse_structure(frozen_chapter.ssmd, dialect="0.9", normalize=False).clean_text
+        == parse_structure(preserved.chapters[0].ssmd, dialect="0.9", normalize=False).clean_text
+    )
+
+
+def test_book_convert_language_failure_leaves_no_bundle_and_preserve_succeeds(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "unresolved.epub"
+    make_epub(source, language=None, chapter_language=None)
+    output = tmp_path / "must-not-exist.ssmdbook"
+
+    failed = runner.invoke(app, ["book", "convert", str(source), "--output", str(output)])
+
+    assert failed.exit_code == 1
+    assert "cannot freeze speech semantics" in failed.output
+    assert not output.exists()
+
+    preserved_path = tmp_path / "preserved.ssmdbook"
+    preserved = runner.invoke(
+        app,
+        [
+            "book",
+            "convert",
+            str(source),
+            "--speech-semantics",
+            "preserve",
+            "--output",
+            str(preserved_path),
+        ],
+    )
+    assert preserved.exit_code == 0, preserved.output
+    assert len(load_book_bundle(preserved_path).chapters) == 2

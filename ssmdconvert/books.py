@@ -10,7 +10,11 @@ from .chapter_selection import parse_chapter_selection
 from .errors import BookError
 from .metadata import merge_document_metadata
 from .models import Book, BookChapter, BookInspection, BookInspectionChapter, SourceInfo
-from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SequenceFallbackMode
+from .policy import (
+    DEFAULT_SEQUENCE_FALLBACK_MODE,
+    SequenceFallbackMode,
+    SpeechSemanticsMode,
+)
 from .render import render_standalone_chapter
 
 
@@ -72,8 +76,11 @@ def convert_book(
     language: str | None = None,
     metadata_overrides: Mapping[str, Any] | None = None,
     sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
+    speech_semantics: SpeechSemanticsMode = "freeze",
 ) -> Book:
     """Convert selected EPUB chapters to standalone SSMD in source order."""
+    if speech_semantics not in ("freeze", "preserve"):
+        raise ValueError("speech_semantics must be 'freeze' or 'preserve'")
     inspection, extracted_chapters = _inspect_epub(source)
     metadata = merge_document_metadata(
         inspection.metadata,
@@ -116,10 +123,20 @@ def convert_book(
             )
         )
 
-    return Book(
+    book = Book(
         source=inspection.source,
         metadata=metadata,
         chapters=tuple(book_chapters),
         source_sha256=source_sha256,
         source_chapter_count=len(inspection.chapters),
     )
+    if speech_semantics == "preserve":
+        return book
+    from .speech.conversion import materialize_book_speech
+
+    return materialize_book_speech(
+        book,
+        source_path=source_path,
+        language=language,
+        sequence_fallback_mode=sequence_fallback_mode,
+    ).book

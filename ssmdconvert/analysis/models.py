@@ -10,7 +10,7 @@ from typing import Any, Literal
 from ssmd import ParseStructureResult
 from ttsready import PreparationResult
 
-WorkspaceType = Literal["standalone", "zip", "directory"]
+WorkspaceType = Literal["standalone", "zip", "directory", "generated"]
 WorkspaceStatus = Literal["valid", "clean", "dirty"]
 IssueSeverity = Literal["info", "warning", "error"]
 IssueOrigin = Literal["ssmd", "ttsready", "mapping", "workspace", "projection"]

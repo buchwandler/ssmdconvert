@@ -8,6 +8,8 @@ ssmdconvert speech annotate chapter.ssmd -o annotated.ssmd
 ssmdconvert speech annotate BOOK.ssmdbook --chapters 2-4 -o annotated-copy.ssmdbook
 ```
 
+For a new EPUB artifact, `ssmdconvert book convert` freezes eligible automatic decisions during conversion by default; choose `--speech-semantics preserve` for a structural-only result. This one-pass path uses the same analysis/materialization rules described here. `speech annotate` remains useful for existing SSMD sources and review workflows.
+
 For book sources, chapter selectors use original 1-based source numbers. Unselected
 chapters remain unchanged. Directory workspaces, including dirty workspaces, are
 read as-is, but the output destination must be outside the source workspace. Use

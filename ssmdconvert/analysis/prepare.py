@@ -176,6 +176,8 @@ def analyze_ssmd_source(
         *_pronunciation_overrides(pronunciations or {}),
     )
     if prepared_result is None:
+        # Conversion shares this override-aware, review-capable path.
+        # prepare_run is not equivalent yet.
         try:
             preparation = ttsready.prepare_units(
                 extracted.units,

@@ -27,7 +27,9 @@ New book conversions default to `sequence_fallback_mode=preserve`; `spell` remai
 ssmdconvert book convert novel.epub -l de-DE --metadata-file book-metadata.yaml -o novel.ssmdbook
 ```
 
-`-l/--language` overrides the EPUB language. Without an override, the EPUB value is retained; if the source has no language, conversion leaves it absent. The effective language is stored in the bundle metadata and every chapter. `--metadata-file` accepts UTF-8 YAML with supported bibliographic and portable SSMD fields. Source metadata is overridden by the file, explicit CLI flags override the file, and the effective sequence policy takes final precedence.
+`-l/--language` overrides the EPUB language. The effective language is stored in the bundle metadata and every chapter. `--metadata-file` accepts UTF-8 YAML with supported bibliographic and portable SSMD fields. Source metadata is overridden by the file, explicit CLI flags override the file, and the effective sequence policy takes final precedence.
+
+`book convert` defaults to `--speech-semantics freeze`: the selected chapters pass through the existing SSMD-aware `ttsready` analysis and safe automatic decisions are written as exact `sub` annotations. Visible source text is unchanged, aliases come from `ttsready`/`spokenform`, and existing author-owned `sub`, `as`, phoneme, language, and provider semantics remain authoritative. Freeze requires an effective language from the EPUB or metadata overrides; otherwise pass `--language` or choose `--speech-semantics preserve` for the historical structural-only result.
 
 Inspect stored metadata in either bundle format. The command reports directory workspace status (including dirty chapters) before the metadata; ZIP inputs are strictly validated:
 
@@ -89,6 +91,6 @@ validate_book_bundle("selected.ssmdbook")
 
 `Book.source_sha256` is captured during conversion. Bundle writing persists that captured hash and does not reread the source file. After loading a bundle, source provenance remains available in `Book.source`, but its local `path` is `None`.
 
-`convert_book()` also accepts `language` and `metadata_overrides`. The explicit language wins over source and metadata-file values. The returned `Book.metadata` includes the effective language and portable metadata, and every chapter copies each supported portable SSMD key before SSMD 0.9 validation.
+`convert_book()` also accepts `language`, `metadata_overrides`, and `speech_semantics="freeze"` (the default). Pass `speech_semantics="preserve"` for structural-only conversion. The explicit language wins over source and metadata-file values. Freeze requires a resolvable effective language; the returned `Book.metadata` includes the effective language and portable metadata, and every chapter copies each supported portable SSMD key before SSMD 0.9 validation.
 
 See [Bundle format](bundle-format.md) for manifest fields, canonical paths, integrity checks, and resource limits.

@@ -39,8 +39,9 @@ python -m pip install "ssmdconvert[all]"
 ```
 
 Python 3.10 or newer is required. Conversion, analysis, and EPUB extraction run
-locally. Speech preparation commands operate on SSMD and are separate from document
-conversion.
+locally. EPUB book conversion freezes safe automatic speech decisions by default;
+speech audit/annotate/freeze remain available for existing SSMD artifacts and
+review workflows.
 
 ## Convert a document
 
@@ -80,6 +81,8 @@ ssmdconvert book metadata novel.ssmdbook.zip --json
 ```
 
 Chapter selectors use original 1-based source numbers. Selected chapters remain in source order. Use `--format directory` or `--format zip` when the output name does not end in `.ssmdbook` or `.ssmdbook.zip`. Bundle destinations are not overwritten unless `--force` is given; forced directory writes replace the complete prior directory rather than merging files.
+
+Book conversion defaults to `--speech-semantics freeze`, which materializes safe automatic speech decisions from `ttsready`/`spokenform` as explicit SSMD `sub` annotations without changing visible text. Freeze requires an effective language; supply `--language` or select `--speech-semantics preserve` for structural-only conversion. Existing author-owned speech annotations remain authoritative.
 
 Editing a referenced chapter makes the directory workspace dirty, but workspace loading returns the actual valid SSMD instead of failing on a stale hash. `book metadata` reports clean/dirty status and dirty chapter count. Use `book refresh` to update manifest digests and character counts explicitly; `book refresh --check` does not mutate and exits non-zero when dirty or invalid. `book pack` creates a strict ZIP from current valid workspace contents without changing the source manifest. The reserved `.readio/` directory is downstream local state: it is ignored by validation and never included in ZIP output.
 
@@ -133,6 +136,7 @@ book = convert_book(
     "novel.epub",
     chapters="2-20",
     language="de-DE",
+    speech_semantics="freeze",
     metadata_overrides={"voice_defaults": {"narrator": {"rate": "slow"}}},
 )
 write_book_bundle(book, "selected.ssmdbook", format="directory")
