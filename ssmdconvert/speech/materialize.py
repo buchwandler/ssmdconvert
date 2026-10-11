@@ -67,7 +67,7 @@ def materialize_substitutions(
             and change.raw_source_end is not None
         ):
             eligible.append(change)
-        elif change.mapping_status == "unmappable":
+        elif change.final_disposition == "unresolved":
             message = change.reason or "Automatic change has no exact SSMD source mapping."
             issues.append(_issue(change, message, severity="error" if strict else "warning"))
             if strict:

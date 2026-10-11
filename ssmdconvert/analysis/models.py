@@ -65,6 +65,28 @@ class SsmdTextContext:
 
 
 @dataclass(frozen=True, slots=True)
+class UnitCoverage:
+    """Evidence that every narrated text context is represented exactly once."""
+
+    narratable_contexts: int
+    covered_contexts: int
+    uncovered_context_ids: tuple[str, ...]
+    duplicate_unit_ids: tuple[str, ...]
+    orphan_unit_ids: tuple[str, ...]
+    protected_units: int
+    excluded_title_contexts: int
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.covered_contexts == self.narratable_contexts
+            and not (
+                self.uncovered_context_ids or self.duplicate_unit_ids or self.orphan_unit_ids
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SsmdUnitLocator:
     """SSMD clean-text coordinates for one generic ttsready unit."""
 
@@ -104,6 +126,7 @@ class SsmdAnalysis:
     structures: Mapping[str, ParseStructureResult]
     unit_locators: Mapping[str, SsmdUnitLocator]
     contexts: tuple[SsmdTextContext, ...]
+    coverage: UnitCoverage
     preparation: PreparationResult
     issues: tuple[SsmdAnalysisIssue, ...]
     requested_language: str | None

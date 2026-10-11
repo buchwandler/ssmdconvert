@@ -5,11 +5,14 @@ from pathlib import Path
 
 import pytest
 from ssmd import ParseStructureResult, TextSpan, parse_structure
+from ttsready import SpokenChange
 
+from ssmdconvert.analysis.models import LoadedSsmdSection, LoadedSsmdSource
 from ssmdconvert.analysis.prepare import analyze_ssmd_source
 from ssmdconvert.errors import MappingError, MaterializationError
 from ssmdconvert.speech.mapping import map_analysis_changes, source_range_for_clean_span
 from ssmdconvert.speech.materialize import materialize_substitutions
+from ssmdconvert.speech.workflows import materialize_analysis
 
 
 def _document(body: str) -> str:
@@ -147,6 +150,10 @@ def test_materialization_preserves_visible_text_and_is_idempotent(tmp_path: Path
     after = _structure(result.ssmd)
     assert result.ssmd != section.ssmd
     assert after.clean_text == before.clean_text
+    before_sub_count = sum("sub" in annotation.attrs for annotation in before.annotations)
+    after_sub_count = sum("sub" in annotation.attrs for annotation in after.annotations)
+    applied_count = sum(item.materialization_status == "applied" for item in result.changes)
+    assert after_sub_count - before_sub_count == applied_count
     assert all(
         item.materialization_status == "applied"
         for item in result.changes
@@ -177,7 +184,7 @@ def test_materialization_rejects_unmappable_overlapping_and_stale_ranges(tmp_pat
     unsafe = replace(
         available,
         mapping_status="unmappable",
-        materialization_status="not-materializable",
+        materialization_status="unresolved",
         raw_source_start=None,
         raw_source_end=None,
         reason="test source mismatch",
@@ -199,6 +206,47 @@ def test_materialization_rejects_unmappable_overlapping_and_stale_ranges(tmp_pat
         materialize_substitutions(section.ssmd, structure, (stale,))
 
 
+def test_mapping_classifies_every_overlapping_change_as_unresolved(tmp_path: Path) -> None:
+    path = tmp_path / "overlap.ssmd"
+    path.write_text(_document("Measure 5 kg."), encoding="utf-8")
+    analysis = analyze_ssmd_source(path)
+    mapped = map_analysis_changes(analysis)
+    candidate = next(item for item in mapped if item.mapping_status == "exact")
+    duplicate = replace(candidate.change, id="chg:test-overlap")
+    analysis = replace(
+        analysis,
+        preparation=replace(analysis.preparation, changes=(candidate.change, duplicate)),
+    )
+
+    conflicts = map_analysis_changes(analysis)
+
+    assert len(conflicts) == 2
+    assert all(item.final_disposition == "unresolved" for item in conflicts)
+    assert all(item.reason and "overlap" in item.reason for item in conflicts)
+    with pytest.raises(MaterializationError, match="overlap"):
+        materialize_analysis(analysis)
+
+
+def test_unrepresentable_replacement_is_classified_unresolved(tmp_path: Path) -> None:
+    path = tmp_path / "unrepresentable.ssmd"
+    path.write_text(_document("Measure 5 kg."), encoding="utf-8")
+    analysis = analyze_ssmd_source(path)
+    mapped = map_analysis_changes(analysis)
+    candidate = next(item for item in mapped if item.mapping_status == "exact")
+    invalid = replace(candidate.change, replacement="spoken\non two lines")
+    analysis = replace(
+        analysis,
+        preparation=replace(analysis.preparation, changes=(invalid,)),
+    )
+
+    unresolved = map_analysis_changes(analysis)[0]
+
+    assert unresolved.final_disposition == "unresolved"
+    assert unresolved.reason is not None and "line breaks" in unresolved.reason
+    with pytest.raises(MaterializationError, match="line breaks"):
+        materialize_analysis(analysis)
+
+
 def test_existing_author_sub_is_never_materialized_again(tmp_path: Path) -> None:
     source = _document('[AWS]{sub="Amazon Web Services"}.')
     path = tmp_path / "author.ssmd"
@@ -218,6 +266,91 @@ def test_existing_author_sub_is_never_materialized_again(tmp_path: Path) -> None
     assert result.ssmd.count("{sub=") == 1
 
 
+
+
+def test_different_author_sub_remains_the_final_authority(tmp_path: Path) -> None:
+    source = _document('[5 kg]{sub="five kilos"}.')
+    path = tmp_path / "manual.ssmd"
+    path.write_text(source, encoding="utf-8")
+    analysis = analyze_ssmd_source(path)
+
+    mapped = map_analysis_changes(analysis)
+    author_change = next(item for item in mapped if item.change.source == "5 kg")
+    result = materialize_substitutions(
+        analysis.sections[0].ssmd,
+        analysis.structures[analysis.sections[0].id],
+        mapped,
+    )
+
+    assert author_change.change.replacement == "five kilos"
+    assert author_change.final_disposition == "already-authoritative"
+    assert result.ssmd == source
+    assert result.changes[0].final_disposition == "already-authoritative"
+
+
+@pytest.mark.parametrize(
+    "attribute",
+    ['as="digits"', 'say-as="digits"', 'phoneme="F A I V"'],
+)
+def test_author_owned_speech_attributes_receive_explicit_disposition(
+    tmp_path: Path, attribute: str
+) -> None:
+    source = _document(f"[5]{{{attribute}}}.")
+    path = tmp_path / "protected.ssmd"
+    loaded = LoadedSsmdSource(
+        path=path,
+        kind="ssmd",
+        input_format="ssmd",
+        title=None,
+        metadata={"language": "en-US"},
+        sections=(
+            LoadedSsmdSection(
+                id="document-0001",
+                index=1,
+                title=None,
+                level=1,
+                ssmd=source,
+            ),
+        ),
+        source_sha256="0" * 64,
+        content_fingerprint="1" * 64,
+        workspace_type="standalone",
+        workspace_status="valid",
+    )
+    analysis = analyze_ssmd_source(loaded, include_titles=False)
+    prepared_unit = next(unit for unit in analysis.preparation.units if unit.role == "prose")
+    injected = SpokenChange(
+        id="chg:test-author-owned",
+        unit_id=prepared_unit.unit_id,
+        source_start=0,
+        source_end=1,
+        output_start=0,
+        output_end=4,
+        source="5",
+        replacement="five",
+        stages=("test",),
+        kind="test",
+        rule="test",
+        recognition_domain=None,
+        provenance={"origin": "test"},
+        language="en-US",
+    )
+    analysis = replace(
+        analysis,
+        preparation=replace(analysis.preparation, changes=(injected,)),
+    )
+
+    mapped = map_analysis_changes(analysis)
+    result = materialize_analysis(analysis)
+
+    assert len(mapped) == 1
+    assert mapped[0].mapping_status == "protected"
+    assert mapped[0].final_disposition == "author-owned"
+    assert result.section_ssmd[analysis.sections[0].id] == source
+    assert result.changes[0].materialization_status == "author-owned"
+    assert result.summary.author_owned == 1
+    assert result.summary.complete
+
 def test_escaped_automatic_change_remains_reportable_but_cannot_be_written(
     tmp_path: Path,
 ) -> None:
@@ -229,6 +362,8 @@ def test_escaped_automatic_change_remains_reportable_but_cannot_be_written(
     escaped_change = mapped[0]
 
     assert escaped_change.mapping_status == "unmappable"
+    assert escaped_change.materialization_status == "unresolved"
+    assert escaped_change.final_disposition == "unresolved"
     with pytest.raises(MaterializationError, match="cannot safely materialize"):
         materialize_substitutions(
             analysis.sections[0].ssmd,
@@ -248,6 +383,7 @@ def test_synthetic_title_changes_have_no_fabricated_source_offsets(tmp_path: Pat
 
     assert title_changes
     assert all(item.mapping_status == "synthetic" for item in title_changes)
+    assert all(item.final_disposition == "unresolved" for item in title_changes)
     assert all(
         item.raw_source_start is None and item.raw_source_end is None for item in title_changes
     )

@@ -55,6 +55,7 @@ def _assert_same_book(expected: Any, actual: Any) -> None:
     assert actual.source.path is None
     assert actual.source_sha256 == expected.source_sha256
     assert actual.source_chapter_count == expected.source_chapter_count
+    assert actual.speech_semantics == expected.speech_semantics
     assert [
         (
             chapter.id,
@@ -111,6 +112,31 @@ def test_directory_and_zip_roundtrip_and_equivalence(tmp_path: Path) -> None:
     repacked = write_book_bundle(from_directory, tmp_path / "repacked.ssmdbook.zip", format="zip")
     assert load_book_bundle(repacked).chapters == from_directory.chapters
 
+
+
+
+def test_speech_semantics_provenance_roundtrips_in_both_bundle_formats(tmp_path: Path) -> None:
+    source, complete_book = _book(tmp_path)
+    preserved_book = convert_book(source, speech_semantics="preserve")
+
+    assert complete_book.speech_semantics is not None
+    assert complete_book.speech_semantics["status"] == "complete"
+    assert preserved_book.speech_semantics == {
+        "status": "preserved",
+        "owner": "ssmdconvert",
+        "source_sha256": preserved_book.source_sha256,
+    }
+    assert "engine" not in preserved_book.speech_semantics
+
+    for label, book in (("complete", complete_book), ("preserved", preserved_book)):
+        for bundle_format in ("directory", "zip"):
+            suffix = ".ssmdbook" if bundle_format == "directory" else ".ssmdbook.zip"
+            output = tmp_path / f"{label}-{bundle_format}{suffix}"
+            bundle = write_book_bundle(book, output, format=bundle_format)
+            loaded = load_book_bundle(bundle)
+            _assert_same_book(book, loaded)
+            assert loaded.speech_semantics == book.speech_semantics
+            assert loaded.speech_semantics["status"] == label
 
 def test_source_hash_is_captured_before_bundle_write(tmp_path: Path) -> None:
     source, book = _book(tmp_path)

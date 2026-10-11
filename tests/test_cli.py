@@ -78,7 +78,9 @@ def test_real_command_groups_and_subcommand_help() -> None:
         ("speech", "--help"): ("audit", "annotate", "freeze"),
         ("speech", "audit", "--help"): ("--chapters", "--language", "--json", "--fail-on-warning"),
         ("speech", "annotate", "--help"): ("--output", "--chapters", "--format", "--force"),
-        ("speech", "freeze", "--help"): ("--output", "--chapters", "--format", "--force"),
+        ("speech", "freeze", "--help"): (
+            "--output", "--chapters", "--format", "--force", "--report", "--json"
+        ),
         ("book", "--help"): ("inspect", "convert", "validate", "metadata"),
         ("book", "inspect", "--help"): ("--json",),
         ("book", "convert", "--help"): (
@@ -88,6 +90,8 @@ def test_real_command_groups_and_subcommand_help() -> None:
             "--language",
             "--metadata-file",
             "--sequence-fallback-mode",
+            "--report",
+            "--json",
         ),
         ("book", "metadata", "--help"): ("--json",),
         ("book", "validate", "--help"): ("--json",),

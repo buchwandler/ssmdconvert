@@ -178,12 +178,19 @@ def convert_book(
         total=len(selected_numbers),
     )
 
+    speech_provenance = None
+    if speech_semantics == "preserve":
+        from .speech.provenance import preserved_speech_provenance
+
+        speech_provenance = preserved_speech_provenance(source_sha256)
+
     book = Book(
         source=inspection.source,
         metadata=metadata,
         chapters=tuple(book_chapters),
         source_sha256=source_sha256,
         source_chapter_count=len(inspection.chapters),
+        speech_semantics=speech_provenance,
     )
     if speech_semantics == "preserve":
         return book

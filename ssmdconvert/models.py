@@ -72,6 +72,7 @@ class Book:
     chapters: tuple[BookChapter, ...]
     source_sha256: str
     source_chapter_count: int | None = None
+    speech_semantics: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

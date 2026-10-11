@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -7,7 +9,9 @@ import pytest
 from ssmdconvert.analysis.prepare import analyze_ssmd_source
 from ssmdconvert.errors import MaterializationError
 from ssmdconvert.speech.audit import audit_ssmd
-from ssmdconvert.speech.workflows import materialize_analysis
+from ssmdconvert.speech.mapping import map_analysis_changes
+from ssmdconvert.speech.reporting import build_speech_freeze_report
+from ssmdconvert.speech.workflows import materialize_analysis, summarize_changes
 
 
 def _document(body: str, *, language: str | None = "en-US") -> str:
@@ -61,3 +65,36 @@ def test_materialization_refuses_unresolved_language_without_writing(tmp_path: P
     assert any(issue.code == "analysis.language_unresolved" for issue in analysis.issues)
     with pytest.raises(MaterializationError, match="language is unresolved"):
         materialize_analysis(analysis)
+
+
+
+def test_versioned_freeze_report_counts_complete_and_incomplete_outcomes(tmp_path: Path) -> None:
+    path = tmp_path / "report.ssmd"
+    path.write_text(_document("Measure 5 kg."), encoding="utf-8")
+    analysis = analyze_ssmd_source(path)
+    result = materialize_analysis(analysis)
+
+    complete = build_speech_freeze_report(analysis, result.changes, result.summary)
+    assert complete["format"] == "ssmdconvert-speech-freeze-report"
+    assert complete["version"] == 1
+    assert complete["status"] == "complete"
+    assert complete["complete"] is True
+    assert complete["summary"]["unresolved"] == 0
+    assert complete["summary"]["changes_total"] == len(complete["changes"])
+    assert complete["provenance"]["source_sha256"] == analysis.source.source_sha256
+    assert complete["provenance"]["prepared_fingerprint"]
+    assert complete["changes"][0]["final_disposition"] == "applied"
+    json.dumps(complete)
+
+    mapped = map_analysis_changes(analysis)
+    injected_failure = (
+        replace(mapped[0], materialization_status="unresolved", reason="injected failure"),
+        *mapped[1:],
+    )
+    incomplete_summary = summarize_changes(injected_failure)
+    incomplete = build_speech_freeze_report(analysis, injected_failure, incomplete_summary)
+    assert incomplete["status"] == "incomplete"
+    assert incomplete["complete"] is False
+    assert incomplete["summary"]["unresolved"] == 1
+    assert incomplete["changes"][0]["final_disposition"] == "unresolved"
+    json.dumps(incomplete)

@@ -208,6 +208,7 @@ def _mapped_change(change: Any) -> dict[str, Any]:
             "raw_source_end": change.raw_source_end,
             "mapping_status": change.mapping_status,
             "materialization_status": change.materialization_status,
+            "final_disposition": change.final_disposition,
             "reason": change.reason,
         },
     }

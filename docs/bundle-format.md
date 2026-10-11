@@ -47,6 +47,9 @@ ssmd_version:   0.9
 
 `metadata.sequence_fallback_mode` is application metadata with the values `spell` and `preserve`. New conversions always write it, defaulting to `preserve`; `spell` is still available explicitly. Each chapter mirrors the same setting in its SSMD front matter. Older bundles may omit the value and remain valid. The new writer default does not define or change consumer behavior for an absent legacy field.
 
+
+
+An optional top-level `speech_semantics` object records freeze provenance without adding SSMD metadata keys. A complete freeze stores `status: complete`, `owner: ssmdconvert`, `engine: ttsready`, the source SHA-256, TTSReady and Spokenform versions, and preparation/profile/override/runtime fingerprints; its source hash must match `source.sha256`. Structural-only conversion stores `status: preserved`, owner, and source hash, and does not imply speech was frozen. Legacy manifests may omit this object.
 `metadata` remains an open JSON object within schema version 1. Converters may store portable SSMD keys such as `language`, `voice_bindings`, `voice_defaults`, `pause_defaults`, `prosody_transitions`, `language_detection`, and `requires`, along with bibliographic values. Readers do not require these optional keys and continue to accept unknown third-party metadata keys. Generated chapters mirror the portable SSMD keys and are validated as SSMD 0.9.
 
 Use `ssmdconvert book metadata BUNDLE` to inspect stored metadata. For a directory workspace, metadata inspection uses current valid chapter text even when hashes are stale and prints `Workspace: directory`, `Status: clean|dirty`, and `Dirty chapters: N` before the stored metadata. For a ZIP artifact it first performs strict validation and reports `Workspace: no` and `Status: valid`. The optional `--json` form continues to emit a stable `{"metadata": ...}` object; nested values are rendered as indented JSON in human output.

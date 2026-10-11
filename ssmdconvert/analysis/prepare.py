@@ -403,6 +403,7 @@ def analyze_ssmd_source(
         structures=extracted.structures,
         unit_locators=unit_locators,
         contexts=extracted.contexts,
+        coverage=extracted.coverage,
         preparation=preparation,
         issues=tuple(issues),
         requested_language=language,

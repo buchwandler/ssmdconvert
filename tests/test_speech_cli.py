@@ -50,13 +50,68 @@ def test_speech_audit_json_is_read_only_and_uses_shared_change_ids(tmp_path: Pat
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["schema"] == "ssmdconvert.speech-audit.v1"
+    assert payload["schema"] == "ssmdconvert.speech-audit.v2"
     assert payload["changes"][0]["id"].startswith("chg:v1:")
     assert payload["changes"][0]["source"] == "5 kg"
     assert payload["changes"][0]["replacement"] == "five kilograms"
     assert payload["changes"][0]["ssmd"]["mapping_status"] == "exact"
+    assert payload["changes"][0]["ssmd"]["final_disposition"] == "applied"
     assert source.read_text(encoding="utf-8") == original
 
+    assert payload["freeze_mapping"]["complete"] is True
+    assert payload["freeze_mapping"]["applied"] == 1
+
+
+def test_speech_freeze_reports_json_and_human_summaries(tmp_path: Path) -> None:
+    source = tmp_path / "freeze-source.ssmd"
+    output = tmp_path / "frozen.ssmd"
+    report_path = tmp_path / "freeze-report.json"
+    source.write_text(_document("Measure 5 kg."), encoding="utf-8")
+
+    human = runner.invoke(
+        app,
+        ["speech", "freeze", str(source), "-o", str(output), "--report", str(report_path)],
+    )
+    assert human.exit_code == 0, human.output
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["format"] == "ssmdconvert-speech-freeze-report"
+    assert report["version"] == 1
+    assert report["status"] == "complete"
+    assert report["summary"]["unresolved"] == 0
+    assert "Speech freeze complete:" in human.output
+    assert "author-owned" in human.output
+    assert "{sub=" in output.read_text(encoding="utf-8")
+
+    json_output = tmp_path / "frozen-json.ssmd"
+    machine = runner.invoke(
+        app,
+        ["speech", "freeze", str(source), "-o", str(json_output), "--json"],
+    )
+    assert machine.exit_code == 0, machine.output
+    payload = json.loads(machine.output)
+    assert payload["status"] == "complete"
+    assert payload["output"] == str(json_output)
+    assert payload["summary"]["unresolved"] == 0
+
+
+def test_speech_freeze_failure_reports_incomplete_without_ssmd_output(tmp_path: Path) -> None:
+    source = tmp_path / "unresolved.ssmd"
+    output = tmp_path / "must-not-exist.ssmd"
+    report_path = tmp_path / "incomplete-report.json"
+    source.write_text(_document("Measure 5 kg.", language=None), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["speech", "freeze", str(source), "-o", str(output), "--report", str(report_path)],
+    )
+
+    assert result.exit_code == 1
+    assert not output.exists()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "incomplete"
+    assert report["complete"] is False
+    assert report["output"] is None
+    assert report["failure"]
 
 def test_standalone_annotate_is_safe_and_freeze_is_idempotent(tmp_path: Path) -> None:
     source = tmp_path / "source.ssmd"
@@ -134,7 +189,10 @@ def test_bundle_chapter_selection_and_freeze_roundtrip(tmp_path: Path) -> None:
         ["speech", "freeze", str(annotated), "--chapters", "1", "-o", str(frozen)],
     )
     assert second.exit_code == 0, second.output
-    assert frozen.read_bytes() == annotated.read_bytes()
+    frozen_book = load_book_bundle(frozen)
+    assert frozen_book.chapters == annotated_book.chapters
+    assert frozen_book.speech_semantics is not None
+    assert frozen_book.speech_semantics["status"] == "complete"
 
 
 def test_dirty_workspace_writes_only_to_a_new_destination(tmp_path: Path) -> None:

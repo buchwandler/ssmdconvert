@@ -317,6 +317,9 @@ def test_book_convert_freezes_by_default_and_supports_preserve_mode(tmp_path: Pa
     )
     assert frozen_result.exit_code == 0, frozen_result.output
     frozen = load_book_bundle(frozen_path)
+    assert "Speech freeze complete:" in frozen_result.output
+    assert frozen.speech_semantics is not None
+    assert frozen.speech_semantics["status"] == "complete"
     frozen_chapter = frozen.chapters[0]
     assert '[3–2–1]{sub="three - two - one"}' in frozen_chapter.ssmd
     assert frozen_chapter.id == "chapter-0001"
@@ -334,12 +337,44 @@ def test_book_convert_freezes_by_default_and_supports_preserve_mode(tmp_path: Pa
         ],
     )
     assert preserved_result.exit_code == 0, preserved_result.output
+    assert "Speech semantics: preserved" in preserved_result.output
     preserved = load_book_bundle(preserved_path)
     assert "{sub=" not in preserved.chapters[0].ssmd
     assert (
         parse_structure(frozen_chapter.ssmd, dialect="0.9", normalize=False).clean_text
         == parse_structure(preserved.chapters[0].ssmd, dialect="0.9", normalize=False).clean_text
     )
+
+
+def test_book_convert_json_report_and_file_report(tmp_path: Path) -> None:
+    source = tmp_path / "report.epub"
+    output = tmp_path / "reported.ssmdbook"
+    report_path = tmp_path / "reported.json"
+    make_epub(source, chapter_one_suffix=" Initiate in 3–2–1.")
+
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "convert",
+            str(source),
+            "--output",
+            str(output),
+            "--report",
+            str(report_path),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    file_report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload == file_report
+    assert payload["status"] == "complete"
+    assert payload["complete"] is True
+    assert payload["chapter_count"] == 2
+    assert payload["output"] == str(output)
+    assert load_book_bundle(output).speech_semantics["status"] == "complete"
 
 
 def test_book_convert_language_failure_leaves_no_bundle_and_preserve_succeeds(
@@ -354,6 +389,27 @@ def test_book_convert_language_failure_leaves_no_bundle_and_preserve_succeeds(
     assert failed.exit_code == 1
     assert "cannot freeze speech semantics" in failed.output
     assert not output.exists()
+
+
+    report_output = tmp_path / "incomplete-book-report.json"
+    failed_with_report = runner.invoke(
+        app,
+        [
+            "book",
+            "convert",
+            str(source),
+            "--output",
+            str(output),
+            "--report",
+            str(report_output),
+        ],
+    )
+    assert failed_with_report.exit_code == 1
+    assert not output.exists()
+    incomplete = json.loads(report_output.read_text(encoding="utf-8"))
+    assert incomplete["status"] == "incomplete"
+    assert incomplete["complete"] is False
+    assert incomplete["output"] is None
 
     preserved_path = tmp_path / "preserved.ssmdbook"
     preserved = runner.invoke(

@@ -36,6 +36,9 @@ flags override the file, and the effective sequence policy takes final precedenc
 
 `book convert` defaults to `--speech-semantics freeze`: the selected chapters pass through the existing SSMD-aware `ttsready` analysis and safe automatic decisions are written as exact `sub` annotations. Visible source text is unchanged, aliases come from `ttsready`/`spokenform`, and existing author-owned `sub`, `as`, phoneme, language, and provider semantics remain authoritative. Freeze requires an effective language for each text run. Use `--language` for unscoped/base text when source metadata is absent or incorrect; inline SSMD language spans remain authoritative. Choose `--speech-semantics preserve` for structural-only output.
 
+
+Freeze and book conversion print terminal decision counts (applied, already authoritative, author-owned, unresolved). Use `--json` to emit the versioned freeze report to stdout or `--report PATH` to save it atomically. A successful bundle's manifest records the source hash, TTSReady and Spokenform versions, and preparation/runtime fingerprints. Preserve-mode bundles record `speech_semantics.status: preserved`; they never claim a complete freeze.
+
 `book convert` also accepts `--spacy off|auto|sm|md|lg|trf` and
 `--progress/--no-progress`. spaCy is opt-in and local-only; `auto` falls back
 without hints when no compatible model is installed, while explicit tiers require

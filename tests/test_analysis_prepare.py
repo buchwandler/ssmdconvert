@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ import ttsready
 from ssmdconvert.analysis import load_ssmd_source
 from ssmdconvert.analysis.prepare import analyze_ssmd_source
 from ssmdconvert.analysis.units import extract_units
+from ssmdconvert.errors import MaterializationError
+from ssmdconvert.speech.workflows import materialize_analysis
 
 
 def _write_source(tmp_path: Path, body: str, *, language: str | None = "en-US") -> Path:
@@ -116,6 +119,8 @@ def test_missing_language_is_structured_and_never_defaults_to_english(tmp_path: 
 
     assert analysis.preparation.units == ()
     assert analysis.effective_languages == ()
+    assert not analysis.coverage.complete
+    assert analysis.coverage.uncovered_context_ids
     assert any(issue.code == "analysis.language_unresolved" for issue in analysis.issues)
     assert analyze_ssmd_source(source, language="en-US").preparation.units
 
@@ -171,3 +176,75 @@ def test_stored_sequence_fallback_and_explicit_language_fallback_are_used(tmp_pa
 
     assert analysis.stored_sequence_fallback == "spell"
     assert analysis.effective_sequence_fallback == "spell"
+
+
+
+def test_unit_coverage_proves_exact_context_text_and_documents_excluded_titles(
+    tmp_path: Path,
+) -> None:
+    path = _write_source(
+        tmp_path,
+        'A heading [1]{sub="one"}.\n\nText [SKU-42]{as="characters"}.',
+    )
+    source = load_ssmd_source(path)
+
+    included = extract_units(source)
+    body_only = extract_units(source, include_titles=False)
+
+    assert included.coverage.complete
+    assert included.coverage.narratable_contexts == included.coverage.covered_contexts == 3
+    assert included.coverage.excluded_title_contexts == 0
+    assert included.coverage.protected_units == 1
+    assert body_only.coverage.complete
+    assert body_only.coverage.narratable_contexts == body_only.coverage.covered_contexts == 2
+    assert body_only.coverage.excluded_title_contexts == 1
+
+
+def test_freeze_summary_uses_one_preparation_result_and_keeps_fingerprints(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = _write_source(tmp_path, '[AWS]{sub="Amazon Web Services"}; Measure 5 kg.')
+    original = ttsready.prepare_units
+    calls = 0
+
+    def record(units: object, **kwargs: object) -> ttsready.PreparationResult:
+        nonlocal calls
+        calls += 1
+        return original(units, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ttsready, "prepare_units", record)
+    analysis = analyze_ssmd_source(path)
+
+    assert calls == 1
+    assert analysis.preparation.profile_fingerprint
+    assert analysis.preparation.override_fingerprint
+    assert analysis.preparation.runtime_fingerprint
+    assert analysis.preparation.prepared_fingerprint
+    assert analysis.coverage.complete
+
+    def unexpected_prepare(*args: object, **kwargs: object) -> ttsready.PreparationResult:
+        raise AssertionError("materialization must use the analyzed PreparationResult")
+
+    monkeypatch.setattr(ttsready, "prepare_units", unexpected_prepare)
+    materialized = materialize_analysis(analysis)
+
+    assert calls == 1
+    assert materialized.summary.complete
+    assert materialized.summary.changes_total == len(analysis.preparation.changes)
+    assert materialized.summary.applied > 0
+    assert materialized.summary.already_authoritative == 1
+    assert materialized.summary.unresolved == 0
+
+
+
+def test_freeze_refuses_incomplete_narratable_coverage(tmp_path: Path) -> None:
+    path = _write_source(tmp_path, "Measure 5 kg.")
+    analysis = analyze_ssmd_source(path)
+    incomplete_coverage = replace(
+        analysis.coverage,
+        covered_contexts=analysis.coverage.covered_contexts - 1,
+        uncovered_context_ids=("injected-gap",),
+    )
+
+    with pytest.raises(MaterializationError, match="narratable-text coverage"):
+        materialize_analysis(replace(analysis, coverage=incomplete_coverage))

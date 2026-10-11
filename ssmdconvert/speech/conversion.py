@@ -8,11 +8,12 @@ from pathlib import Path
 from ..analysis.models import SsmdAnalysis
 from ..analysis.prepare import analyze_ssmd_source
 from ..analysis.source import loaded_source_from_book
-from ..errors import MaterializationError
 from ..linguistics import LinguisticsConfig
 from ..models import Book
 from ..policy import SequenceFallbackMode
 from ..progress import ProgressCallback, emit_progress
+from .failures import make_speech_freeze_failure
+from .provenance import build_speech_provenance
 from .workflows import AnalysisMaterialization, materialize_analysis
 
 
@@ -52,12 +53,33 @@ def materialize_book_speech(
         on_progress=on_progress,
     )
     if any(issue.code == "analysis.language_unresolved" for issue in analysis.issues):
-        raise MaterializationError(
+        raise make_speech_freeze_failure(
+            analysis,
             "cannot freeze speech semantics because no effective language could be resolved; "
-            "pass --language <LANG> or use --speech-semantics preserve"
+            "pass --language <LANG> or use --speech-semantics preserve",
+        )
+    if not analysis.coverage.complete:
+        raise make_speech_freeze_failure(
+            analysis,
+            "cannot freeze book speech semantics because narratable-text coverage is incomplete",
+        )
+    expected_excluded_titles = sum(bool(chapter.title) for chapter in book.chapters)
+    if analysis.coverage.excluded_title_contexts != expected_excluded_titles:
+        raise make_speech_freeze_failure(
+            analysis,
+            "cannot verify intentionally excluded book metadata titles during speech freezing",
         )
     emit_progress(on_progress, "phase.started", "speech.materialize.apply")
-    materialization = materialize_analysis(analysis)
+    try:
+        materialization = materialize_analysis(analysis)
+    except Exception as exc:
+        raise make_speech_freeze_failure(analysis, str(exc)) from exc
+    if not materialization.summary.complete:
+        raise make_speech_freeze_failure(
+            analysis,
+            "cannot return a book with incomplete speech semantics "
+            f"({materialization.summary.unresolved} unresolved changes)",
+        )
     chapters = tuple(
         replace(
             chapter,
@@ -73,7 +95,11 @@ def materialize_book_speech(
         total=len(materialization.section_ssmd),
     )
     result = BookSpeechMaterialization(
-        book=replace(book, chapters=chapters),
+        book=replace(
+            book,
+            chapters=chapters,
+            speech_semantics=build_speech_provenance(analysis),
+        ),
         analysis=analysis,
         materialization=materialization,
     )

@@ -64,7 +64,7 @@ The book CLI uses explicit subcommands:
 
 ```bash
 ssmdconvert book inspect novel.epub [--json]
-ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve] [--speech-semantics freeze|preserve] [--spacy off|auto|sm|md|lg|trf] [--progress|--no-progress]
+ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve] [--speech-semantics freeze|preserve] [--report PATH] [--json] [--spacy off|auto|sm|md|lg|trf] [--progress|--no-progress]
 ssmdconvert book validate BUNDLE [--json]
 ssmdconvert book metadata BUNDLE [--json]
 ```
@@ -87,7 +87,7 @@ ssmdconvert context SOURCE CHANGE_ID [--paragraph] [--json]
 ssmdconvert txt SOURCE [--chapters SELECTOR] [-o OUTPUT]
 ssmdconvert speech audit SOURCE [--json]
 ssmdconvert speech annotate SOURCE -o OUTPUT
-ssmdconvert speech freeze SOURCE -o OUTPUT
+ssmdconvert speech freeze SOURCE -o OUTPUT [--report PATH] [--json]
 ```
 
 Report, TXT, speech audit/annotate/freeze, and book conversion accept
@@ -96,6 +96,9 @@ Report, TXT, speech audit/annotate/freeze, and book conversion accept
 Rich UI or plain status output goes to stderr, leaving report, TXT, and JSON
 stdout clean.
 The commands accept standalone SSMD, validated ZIP bundles, and directory workspaces. Reports and TXT share a projection; `context` resolves a generic change ID from a report cache. `speech audit` is read-only. Annotation and freeze write to a new destination by default, preserve visible text, and refuse to modify a source workspace in place. Existing output requires `--force`; the input cannot be overwritten. See [SSMD analysis and speech workflows](analysis-workflows.md) for language handling, cache freshness, workspace policy, and migration from the removed `ttsready` CLI.
+
+
+`speech audit --json` emits a versioned per-change mapping summary. `speech freeze` and `book convert` print applied/already-authoritative/author-owned/unresolved counts; add `--json` to emit the versioned freeze report or `--report PATH` to save it. An incomplete freeze exits non-zero without publishing SSMD output; an explicitly requested report describes the incomplete result.
 
 ## Help
 

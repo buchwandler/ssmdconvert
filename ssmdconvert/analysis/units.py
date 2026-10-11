@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -22,6 +23,7 @@ from .models import (
     LoadedSsmdSource,
     SsmdAnalysisIssue,
     SsmdTextContext,
+    UnitCoverage,
 )
 
 _PARAGRAPH_SEPARATOR = re.compile(r"\n(?:[ \t]*\n)+")
@@ -40,6 +42,7 @@ class UnitExtraction:
     structures: Mapping[str, ParseStructureResult]
     issues: tuple[SsmdAnalysisIssue, ...]
     effective_languages: tuple[str, ...]
+    coverage: UnitCoverage
 
 
 def _stable_id(prefix: str, payload: Mapping[str, Any]) -> str:
@@ -223,6 +226,50 @@ def _paragraph_ranges(text: str) -> tuple[tuple[int, int], ...]:
     return tuple(ranges)
 
 
+def _unit_coverage(
+    contexts: tuple[SsmdTextContext, ...],
+    units: tuple[TextUnit, ...],
+    *,
+    excluded_title_contexts: int,
+) -> UnitCoverage:
+    """Compare each narratable context with the exact ordered text sent to ttsready."""
+    unit_counts = Counter(unit.id for unit in units)
+    unit_by_id = {unit.id: unit for unit in units}
+    referenced_ids: list[str] = []
+    uncovered: list[str] = []
+    covered = 0
+    narratable_contexts = tuple(context for context in contexts if context.source_text.strip())
+
+    for context in narratable_contexts:
+        referenced_ids.extend(context.unit_ids)
+        context_units = [
+            unit_by_id[unit_id] for unit_id in context.unit_ids if unit_id in unit_by_id
+        ]
+        if (
+            len(context_units) != len(context.unit_ids)
+            or len(set(context.unit_ids)) != len(context.unit_ids)
+            or "".join(unit.text for unit in context_units) != context.source_text
+        ):
+            uncovered.append(context.id)
+        else:
+            covered += 1
+
+    reference_counts = Counter(referenced_ids)
+    duplicate_ids = {
+        unit_id for unit_id, count in unit_counts.items() if count > 1
+    } | {unit_id for unit_id, count in reference_counts.items() if count > 1}
+    orphan_ids = set(unit_by_id) - set(referenced_ids)
+    return UnitCoverage(
+        narratable_contexts=len(narratable_contexts),
+        covered_contexts=covered,
+        uncovered_context_ids=tuple(uncovered),
+        duplicate_unit_ids=tuple(sorted(duplicate_ids)),
+        orphan_unit_ids=tuple(sorted(orphan_ids)),
+        protected_units=sum(bool(unit.protected_spans) for unit in units),
+        excluded_title_contexts=excluded_title_contexts,
+    )
+
+
 def _validate_language(value: str | None, name: str) -> str | None:
     if value is None:
         return None
@@ -254,6 +301,7 @@ def extract_units(
     structures: dict[str, ParseStructureResult] = {}
     issues: list[SsmdAnalysisIssue] = []
     languages: list[str] = []
+    excluded_title_contexts = 0
 
     for section in selected:
         structure = parse_structure(
@@ -269,6 +317,8 @@ def extract_units(
         text_contexts: list[tuple[int, str, int | None, int | None, bool]] = []
         if include_titles and section.title:
             text_contexts.append((-1, section.title, None, None, True))
+        elif section.title:
+            excluded_title_contexts += 1
         text_contexts.extend(
             (paragraph_index, structure.clean_text[start:end], start, end, False)
             for paragraph_index, (start, end) in enumerate(
@@ -455,4 +505,9 @@ def extract_units(
         structures=structures,
         issues=tuple(issues),
         effective_languages=tuple(languages),
+        coverage=_unit_coverage(
+            tuple(contexts),
+            tuple(units),
+            excluded_title_contexts=excluded_title_contexts,
+        ),
     )

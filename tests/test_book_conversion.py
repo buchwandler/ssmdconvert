@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from ssmdconvert import Book, BookChapter, convert_book
 from ssmdconvert.analysis import analyze_ssmd_source, load_ssmd_source
 from ssmdconvert.analysis.models import LoadedSsmdSection, LoadedSsmdSource
 from ssmdconvert.analysis.units import extract_units
+from ssmdconvert.books import render_standalone_chapter
 from ssmdconvert.errors import MaterializationError
 from ssmdconvert.metadata import PORTABLE_SSMD_METADATA_KEYS
 from ssmdconvert.render import validate_ssmd_document
@@ -179,6 +181,79 @@ def test_convert_book_mirrors_all_portable_metadata_into_valid_chapters(tmp_path
         header = parse_structure(chapter.ssmd, dialect="0.9").header
         for key in PORTABLE_SSMD_METADATA_KEYS:
             assert header[key] == metadata[key]
+
+
+def test_book_freeze_proves_narratable_epub_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "coverage.epub"
+    suffix = (
+        "</p><h2>1</h2><p>Measure 3–2–1, .02, 70s, 20, 2.0, "
+        "Null+1, ART, et cetera. Closing sentence."
+    )
+    make_epub(source, chapter_one_suffix=suffix)
+    original_renderer = render_standalone_chapter
+
+    def render_with_multilingual_span(title, markdown, metadata):
+        rendered = original_renderer(title, markdown, metadata)
+        return rendered.replace(
+            "Hello, 世界",
+            'Hello [bonjour]{lang="fr-FR"}, 世界',
+        )
+
+    monkeypatch.setattr(
+        "ssmdconvert.books.render_standalone_chapter",
+        render_with_multilingual_span,
+    )
+    structural = convert_book(source, speech_semantics="preserve")
+    assert all('{sub="' not in chapter.ssmd for chapter in structural.chapters)
+
+    frozen = materialize_book_speech(structural, source_path=source)
+    context_text = "\n".join(context.source_text for context in frozen.analysis.contexts)
+
+    assert frozen.analysis.coverage.complete
+    assert frozen.analysis.coverage.narratable_contexts == frozen.analysis.coverage.covered_contexts
+    assert frozen.analysis.coverage.excluded_title_contexts == len(structural.chapters)
+    assert "Opening" in context_text and "1" in context_text and "bonjour" in context_text
+    assert "Closing sentence" in context_text and "3–2–1" in context_text
+    assert "fr-FR" in frozen.analysis.effective_languages
+    assert len(frozen.materialization.changes) == len(frozen.analysis.preparation.changes)
+    assert all(
+        change.final_disposition
+        in {"applied", "already-authoritative", "author-owned", "unresolved"}
+        for change in frozen.materialization.changes
+    )
+    assert frozen.materialization.summary.complete
+    assert frozen.materialization.summary.unresolved == 0
+    for structural_chapter, frozen_chapter in zip(
+        structural.chapters, frozen.book.chapters, strict=True
+    ):
+        assert (
+            parse_structure(structural_chapter.ssmd, dialect="0.9", normalize=False).clean_text
+            == parse_structure(frozen_chapter.ssmd, dialect="0.9", normalize=False).clean_text
+        )
+
+
+def test_book_freeze_rejects_incomplete_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "coverage-gap.epub"
+    make_epub(source)
+    structural = convert_book(source, speech_semantics="preserve")
+    original_analyze = analyze_ssmd_source
+
+    def analyze_with_gap(loaded, **kwargs):
+        analysis = original_analyze(loaded, **kwargs)
+        coverage = replace(
+            analysis.coverage,
+            covered_contexts=analysis.coverage.covered_contexts - 1,
+            uncovered_context_ids=("injected-gap",),
+        )
+        return replace(analysis, coverage=coverage)
+
+    monkeypatch.setattr("ssmdconvert.speech.conversion.analyze_ssmd_source", analyze_with_gap)
+    with pytest.raises(MaterializationError, match="coverage"):
+        materialize_book_speech(structural, source_path=source)
 
 
 def test_convert_book_freezes_upstream_speech_decisions_by_default(tmp_path: Path) -> None:

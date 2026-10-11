@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Literal
 
 from ssmd import ParseStructureResult
 
 from ..analysis.models import SsmdAnalysis, SsmdAnalysisIssue
 from ..errors import MappingError
+from .escaping import format_sub_annotation
 from .models import SsmdMappedChange
 
 
@@ -50,7 +52,16 @@ def source_range_for_clean_span(
 
 
 def _has_provider_semantics(attrs: Mapping[str, object]) -> bool:
-    semantic_keys = {"as", "say-as", "ph", "phoneme", "phonemes", "pronunciation", "ipa"}
+    semantic_keys = {
+        "as",
+        "say-as",
+        "ph",
+        "phoneme",
+        "phonemes",
+        "pronunciation",
+        "ipa",
+        "speech-form",
+    }
     if semantic_keys.intersection(attrs):
         return True
     return any(key.startswith(("tts-", "tts:", "provider-", "provider:")) for key in attrs)
@@ -81,6 +92,53 @@ def _annotation_disposition(
     return already_authoritative, protected
 
 
+def _mark_overlapping_changes(
+    changes: tuple[SsmdMappedChange, ...],
+) -> tuple[SsmdMappedChange, ...]:
+    """Classify every conflicting writable source span as unresolved before audit/reporting."""
+    by_section: dict[str, list[tuple[int, SsmdMappedChange]]] = {}
+    for index, change in enumerate(changes):
+        if (
+            change.mapping_status == "exact"
+            and change.materialization_status == "available"
+            and change.raw_source_start is not None
+            and change.raw_source_end is not None
+        ):
+            by_section.setdefault(change.section_id, []).append((index, change))
+
+    conflicts: set[int] = set()
+    for candidates in by_section.values():
+        ordered = sorted(
+            candidates,
+            key=lambda item: (
+                item[1].raw_source_start if item[1].raw_source_start is not None else -1,
+                item[1].raw_source_end if item[1].raw_source_end is not None else -1,
+            ),
+        )
+        component: list[int] = []
+        component_end: int | None = None
+        for index, change in ordered:
+            assert change.raw_source_start is not None and change.raw_source_end is not None
+            if component and component_end is not None and change.raw_source_start < component_end:
+                component.append(index)
+                component_end = max(component_end, change.raw_source_end)
+            else:
+                if len(component) > 1:
+                    conflicts.update(component)
+                component = [index]
+                component_end = change.raw_source_end
+        if len(component) > 1:
+            conflicts.update(component)
+
+    reason = "Writable automatic changes overlap; no SSMD composition contract is available."
+    return tuple(
+        replace(change, materialization_status="unresolved", reason=reason)
+        if index in conflicts
+        else change
+        for index, change in enumerate(changes)
+    )
+
+
 def map_analysis_changes(analysis: SsmdAnalysis) -> tuple[SsmdMappedChange, ...]:
     """Enrich generic changes without modifying their IDs or provenance."""
     section_by_id = {section.id: section for section in analysis.sections}
@@ -106,7 +164,7 @@ def map_analysis_changes(analysis: SsmdAnalysis) -> tuple[SsmdMappedChange, ...]
                     raw_source_start=None,
                     raw_source_end=None,
                     mapping_status="synthetic",
-                    materialization_status="not-materializable",
+                    materialization_status="unresolved",
                     reason="Synthetic chapter title has no raw SSMD body range.",
                 )
             )
@@ -142,7 +200,7 @@ def map_analysis_changes(analysis: SsmdAnalysis) -> tuple[SsmdMappedChange, ...]
                     raw_source_start=None,
                     raw_source_end=None,
                     mapping_status="unmappable",
-                    materialization_status="not-materializable",
+                    materialization_status="unresolved",
                     reason=(
                         "No parser-owned one-to-one text span proves the complete source slice."
                     ),
@@ -151,16 +209,22 @@ def map_analysis_changes(analysis: SsmdAnalysis) -> tuple[SsmdMappedChange, ...]
             continue
 
         raw_start, raw_end = source_range
-        status: Literal["already-authoritative", "not-materializable", "available"]
+        status: Literal["already-authoritative", "author-owned", "available", "unresolved"]
         if already_authoritative:
             status = "already-authoritative"
             reason = "The same spoken form is already specified by an SSMD sub annotation."
         elif protected:
-            status = "not-materializable"
+            status = "author-owned"
             reason = "The source range has authoritative SSMD delivery semantics."
         else:
-            status = "available"
-            reason = None
+            try:
+                format_sub_annotation(change.source, change.replacement)
+            except ValueError as exc:
+                status = "unresolved"
+                reason = f"Replacement cannot be represented safely in SSMD: {exc}"
+            else:
+                status = "available"
+                reason = None
         mapped.append(
             SsmdMappedChange(
                 change=change,
@@ -178,7 +242,7 @@ def map_analysis_changes(analysis: SsmdAnalysis) -> tuple[SsmdMappedChange, ...]
                 reason=reason,
             )
         )
-    return tuple(mapped)
+    return _mark_overlapping_changes(tuple(mapped))
 
 
 def mapping_issues(changes: tuple[SsmdMappedChange, ...]) -> tuple[SsmdAnalysisIssue, ...]:
@@ -197,5 +261,5 @@ def mapping_issues(changes: tuple[SsmdMappedChange, ...]) -> tuple[SsmdAnalysisI
             origin="mapping",
         )
         for change in changes
-        if change.mapping_status == "unmappable"
+        if change.final_disposition == "unresolved"
     )

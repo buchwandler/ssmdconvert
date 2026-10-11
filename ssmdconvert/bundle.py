@@ -87,6 +87,46 @@ def _validate_source_name(value: Any, display: str) -> str:
     return value
 
 
+def _validate_speech_semantics(value: Any, display: str) -> None:
+    if not isinstance(value, dict):
+        _invalid(display, "manifest speech_semantics must be a JSON object")
+    status = value.get("status")
+    if status not in {"complete", "preserved"}:
+        _invalid(display, f"unsupported speech_semantics status: {status!r}")
+    if value.get("owner") != "ssmdconvert":
+        _invalid(display, "manifest speech_semantics owner must be 'ssmdconvert'")
+    if not _is_sha256(value.get("source_sha256")):
+        _invalid(
+            display,
+            "manifest speech_semantics source_sha256 must be a lowercase SHA256 digest",
+        )
+    if status == "complete":
+        if value.get("engine") != "ttsready":
+            _invalid(display, "complete speech_semantics engine must be 'ttsready'")
+        for key in (
+            "ttsready_version",
+            "spokenform_version",
+            "profile_fingerprint",
+            "override_fingerprint",
+            "runtime_fingerprint",
+            "prepared_fingerprint",
+        ):
+            item = value.get(key)
+            if not isinstance(item, str) or not item:
+                _invalid(display, f"complete speech_semantics {key} must be a non-empty string")
+        for key in (
+            "profile_fingerprint",
+            "override_fingerprint",
+            "runtime_fingerprint",
+            "prepared_fingerprint",
+        ):
+            if not _is_sha256(value.get(key)):
+                _invalid(
+                    display,
+                    f"complete speech_semantics {key} must be a lowercase SHA256 digest",
+                )
+
+
 def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         _invalid(display, "manifest root must be a JSON object")
@@ -98,6 +138,8 @@ def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
         _invalid(display, f"unsupported SSMD version: {value.get('ssmd_version')!r}")
     if not isinstance(value.get("metadata"), dict):
         _invalid(display, "manifest metadata must be a JSON object")
+    if "speech_semantics" in value:
+        _validate_speech_semantics(value["speech_semantics"], display)
 
     source = value.get("source")
     if not isinstance(source, dict):
@@ -109,6 +151,9 @@ def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
     _validate_source_name(source.get("name"), display)
     if not _is_sha256(source.get("sha256")):
         _invalid(display, "source sha256 must be a lowercase SHA256 digest")
+    speech_semantics = value.get("speech_semantics")
+    if speech_semantics is not None and speech_semantics["source_sha256"] != source["sha256"]:
+        _invalid(display, "manifest speech_semantics source_sha256 does not match source sha256")
     chapter_count = source.get("chapter_count")
     if not _is_integer(chapter_count) or chapter_count < 0:
         _invalid(display, "source chapter_count must be a non-negative integer")
@@ -254,6 +299,10 @@ def _manifest_for_book(book: Book) -> tuple[bytes, list[tuple[str, bytes]]]:
         },
         "chapters": chapter_entries,
     }
+    if book.speech_semantics is not None:
+        if not isinstance(book.speech_semantics, Mapping):
+            raise BookBundleValidationError("book speech_semantics must be a mapping or null")
+        manifest["speech_semantics"] = dict(book.speech_semantics)
     _validate_manifest(manifest, "book")
     try:
         manifest_bytes = json.dumps(
@@ -459,6 +508,9 @@ def _book_from_manifest(
         chapters=tuple(chapters),
         source_sha256=source["sha256"],
         source_chapter_count=source["chapter_count"],
+        speech_semantics=(
+            dict(manifest["speech_semantics"]) if "speech_semantics" in manifest else None
+        ),
     )
 
 
