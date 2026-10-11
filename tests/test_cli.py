@@ -79,7 +79,12 @@ def test_real_command_groups_and_subcommand_help() -> None:
         ("speech", "audit", "--help"): ("--chapters", "--language", "--json", "--fail-on-warning"),
         ("speech", "annotate", "--help"): ("--output", "--chapters", "--format", "--force"),
         ("speech", "freeze", "--help"): (
-            "--output", "--chapters", "--format", "--force", "--report", "--json"
+            "--output",
+            "--chapters",
+            "--format",
+            "--force",
+            "--report",
+            "--json",
         ),
         ("book", "--help"): ("inspect", "convert", "validate", "metadata"),
         ("book", "inspect", "--help"): ("--json",),

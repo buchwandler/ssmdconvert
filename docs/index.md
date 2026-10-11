@@ -48,5 +48,6 @@ migration-from-ttsready-cli
 books
 bundle-format
 api
+migration-to-v0.2
 changelog
 ```

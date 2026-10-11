@@ -97,8 +97,11 @@ Rich UI or plain status output goes to stderr, leaving report, TXT, and JSON
 stdout clean.
 The commands accept standalone SSMD, validated ZIP bundles, and directory workspaces. Reports and TXT share a projection; `context` resolves a generic change ID from a report cache. `speech audit` is read-only. Annotation and freeze write to a new destination by default, preserve visible text, and refuse to modify a source workspace in place. Existing output requires `--force`; the input cannot be overwritten. See [SSMD analysis and speech workflows](analysis-workflows.md) for language handling, cache freshness, workspace policy, and migration from the removed `ttsready` CLI.
 
-
 `speech audit --json` emits a versioned per-change mapping summary. `speech freeze` and `book convert` print applied/already-authoritative/author-owned/unresolved counts; add `--json` to emit the versioned freeze report or `--report PATH` to save it. An incomplete freeze exits non-zero without publishing SSMD output; an explicitly requested report describes the incomplete result.
+
+The v0.2 Python API uses immutable options and typed results; the CLI examples
+above retain their existing command syntax. See the [Python API reference](api.md)
+and [v0.2 migration guide](migration-to-v0.2.md) before upgrading API callers.
 
 ## Help
 

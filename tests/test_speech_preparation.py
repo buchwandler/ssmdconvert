@@ -67,7 +67,6 @@ def test_materialization_refuses_unresolved_language_without_writing(tmp_path: P
         materialize_analysis(analysis)
 
 
-
 def test_versioned_freeze_report_counts_complete_and_incomplete_outcomes(tmp_path: Path) -> None:
     path = tmp_path / "report.ssmd"
     path.write_text(_document("Measure 5 kg."), encoding="utf-8")

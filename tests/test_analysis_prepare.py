@@ -178,7 +178,6 @@ def test_stored_sequence_fallback_and_explicit_language_fallback_are_used(tmp_pa
     assert analysis.effective_sequence_fallback == "spell"
 
 
-
 def test_unit_coverage_proves_exact_context_text_and_documents_excluded_titles(
     tmp_path: Path,
 ) -> None:
@@ -234,7 +233,6 @@ def test_freeze_summary_uses_one_preparation_result_and_keeps_fingerprints(
     assert materialized.summary.applied > 0
     assert materialized.summary.already_authoritative == 1
     assert materialized.summary.unresolved == 0
-
 
 
 def test_freeze_refuses_incomplete_narratable_coverage(tmp_path: Path) -> None:

@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from ssmd import parse_structure
 from typer.testing import CliRunner
 
+import ssmdconvert.cli as cli_module
 from ssmdconvert import Book, BookChapter, SourceInfo, load_book_bundle, write_book_bundle
 from ssmdconvert.cli import app
 
@@ -112,6 +114,33 @@ def test_speech_freeze_failure_reports_incomplete_without_ssmd_output(tmp_path: 
     assert report["complete"] is False
     assert report["output"] is None
     assert report["failure"]
+
+
+def test_speech_freeze_report_write_failure_names_published_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.ssmd"
+    output = tmp_path / "published.ssmd"
+    report_path = tmp_path / "freeze-report.json"
+    source.write_text(_document("Measure 5 kg."), encoding="utf-8")
+    write_text = cli_module._write_text_atomically
+
+    def fail_report_write(text: str, path: Path, **kwargs: object) -> None:
+        if path == report_path:
+            raise OSError("report disk full")
+        write_text(text, path, **kwargs)
+
+    monkeypatch.setattr(cli_module, "_write_text_atomically", fail_report_write)
+    result = runner.invoke(
+        app,
+        ["speech", "freeze", str(source), "-o", str(output), "--report", str(report_path)],
+    )
+
+    assert result.exit_code == 1
+    assert output.is_file()
+    assert "SSMD speech artifact was published at" in result.output
+    assert "freeze report was not written to" in result.output
+
 
 def test_standalone_annotate_is_safe_and_freeze_is_idempotent(tmp_path: Path) -> None:
     source = tmp_path / "source.ssmd"

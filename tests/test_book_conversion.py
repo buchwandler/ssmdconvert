@@ -6,11 +6,11 @@ import ttsready
 from epub_support import make_epub
 from ssmd import lint, parse_structure
 
-from ssmdconvert import Book, BookChapter, convert_book
+from ssmdconvert import Book, BookChapter
 from ssmdconvert.analysis import analyze_ssmd_source, load_ssmd_source
 from ssmdconvert.analysis.models import LoadedSsmdSection, LoadedSsmdSource
 from ssmdconvert.analysis.units import extract_units
-from ssmdconvert.books import render_standalone_chapter
+from ssmdconvert.books import convert_book, render_standalone_chapter
 from ssmdconvert.errors import MaterializationError
 from ssmdconvert.metadata import PORTABLE_SSMD_METADATA_KEYS
 from ssmdconvert.render import validate_ssmd_document

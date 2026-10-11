@@ -17,9 +17,25 @@ Fresh EPUB conversion applies this freeze automatically: `ssmdconvert book conve
 duplicate authoritative SSMD substitutions, refuses unresolved effective
 language, and never overwrites its input. Existing output requires `--force`.
 
-
-
 Successful freezes print terminal disposition counts. `--json` emits the versioned `ssmdconvert-speech-freeze-report` (version 1) to stdout; `--report PATH` writes the same JSON report atomically. It records source/runtime provenance, narration-coverage evidence, exact per-change mappings, and applied, already-authoritative, author-owned, and unresolved totals. If freezing is incomplete, the command exits non-zero and does not publish the SSMD destination; when requested, its report is marked `incomplete` and includes the failure and unresolved changes.
+
+## In-memory Python API
+
+```python
+from ssmdconvert import AnalysisOptions, analyze_ssmd, freeze_speech
+
+analysis = analyze_ssmd("chapter.ssmd", options=AnalysisOptions(spacy="off"))
+frozen = freeze_speech(analysis)
+for section_id, updated_ssmd in frozen.sections.items():
+    ...  # explicitly decide whether and where to publish this text
+report = frozen.speech.to_dict()
+```
+
+`freeze_speech()` returns `SpeechFreezeResult` with complete rewritten section
+text and final mapping/issue evidence; it never writes the source or a bundle.
+An incomplete attempt raises `SpeechFreezeFailure` with a versioned partial
+report and unresolved change evidence. See the [Python API reference](api.md)
+for the options and result contract.
 
 Book bundles store this provenance in `manifest.json`, not in invented SSMD metadata. A successful default freeze records `status: complete`, TTSReady/Spokenform versions, and fingerprints. `--speech-semantics preserve` records `status: preserved` and does not claim a completed freeze.
 Dirty directory workspaces may be read, but the output must be a new path outside

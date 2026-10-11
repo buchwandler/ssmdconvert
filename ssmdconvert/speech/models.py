@@ -8,9 +8,7 @@ from typing import Literal
 from ttsready import SpokenChange
 
 SpeechFreezeStatus = Literal["complete", "incomplete", "preserved"]
-SpeechChangeDisposition = Literal[
-    "applied", "already-authoritative", "author-owned", "unresolved"
-]
+SpeechChangeDisposition = Literal["applied", "already-authoritative", "author-owned", "unresolved"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,9 +27,9 @@ class SpeechFreezeSummary:
         return (
             self.status == "complete"
             and self.unresolved == 0
-            and self.changes_total
-            == self.applied + self.already_authoritative + self.author_owned
+            and self.changes_total == self.applied + self.already_authoritative + self.author_owned
         )
+
 
 @dataclass(frozen=True, slots=True)
 class SsmdMappedChange:
@@ -56,7 +54,6 @@ class SsmdMappedChange:
         "applied",
     ]
     reason: str | None = None
-
 
     @property
     def final_disposition(self) -> SpeechChangeDisposition:

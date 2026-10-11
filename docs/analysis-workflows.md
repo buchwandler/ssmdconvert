@@ -20,6 +20,43 @@ The commands accept a standalone `.ssmd`/`.ssmd.md` file, a validated
 `.ssmdbook.zip`, or an editable `.ssmdbook/` directory workspace. Chapter selectors
 are original 1-based source chapter numbers and preserve source order.
 
+## Python API and cache boundary
+
+The root Python facade composes the same SSMD analysis, projection, report, and
+speech materialization services as the CLI:
+
+```python
+from ssmdconvert import (
+    AnalysisOptions,
+    TextProjectionOptions,
+    analyze_ssmd,
+    build_report,
+    freeze_speech,
+    lookup_change_context,
+    project_text,
+)
+
+analysis = analyze_ssmd("chapter.ssmd", options=AnalysisOptions(spacy="off"))
+projection = project_text(analysis, options=TextProjectionOptions(max_paragraph_chars=1000))
+report = build_report(analysis, projection=projection)
+if analysis.preparation.changes:
+    context = lookup_change_context(analysis, analysis.preparation.changes[0].id)
+frozen = freeze_speech(analysis)  # returns rewritten section text; writes nothing
+```
+
+`analyze_ssmd()` accepts a standalone SSMD or validated bundle/workspace path,
+and an in-memory `Book` or `BookConversionResult`; it writes no temporary
+bundle or cache. Reusing `projection` in `build_report()` keeps its statistics
+and prepared-output digest identical to the TXT projection. `audit_speech()`
+and `freeze_speech()` consume existing analysis and do not prepare it again.
+
+Disk persistence has explicit names and controls. `analyze_cached(source, cache_root=..., refresh=...)` saves checksummed analysis records; it is the
+Python equivalent of the CLI report's persistent cache. Use
+`lookup_cached_context(source, change_id, cache_root=...)` for freshness-checked
+persisted context. Use `lookup_change_context(analysis_or_report, change_id)`
+when the typed evidence is already in memory and no cache lookup is wanted. See
+the [Python API reference](api.md) for complete signatures and result types.
+
 ## Report
 
 ```bash

@@ -1,6 +1,14 @@
 # Releasing ssmdconvert
 
-Package versions are derived from Git tags by `setuptools-scm`. Release tags use the `vX.Y.Z` form, for example `v0.1.0`.
+Package versions are derived from Git tags by `setuptools-scm`. Release tags use the `vX.Y.Z` form, for example `v0.2.0`.
+
+## v0.2.0 release boundary
+
+The API redesign targets v0.2.0 as a planned, unreleased version. This
+implementation is release readiness only: do not create or push a Git tag, publish
+a GitHub Release, or publish distributions without separate explicit release
+authorization. The 1.0.0 stability milestone is deferred until compatibility,
+supported-version, and distribution gates are established and reviewed.
 
 ## 1. Local release-readiness checks
 
@@ -15,9 +23,9 @@ python -m mypy --config-file tests/typecheck/mypy.ini tests/typecheck/public_api
 python -m pip install -r docs/requirements.txt
 python -m sphinx -W --keep-going -b html docs docs/_build/html
 rm -rf dist build
-SETUPTOOLS_SCM_PRETEND_VERSION=0.1.0 python -m build
+SETUPTOOLS_SCM_PRETEND_VERSION=0.2.0 python -m build
 python -m twine check dist/*
-RELEASE_TAG=v0.1.0 python tools/check_release_artifacts.py
+RELEASE_TAG=v0.2.0 python tools/check_release_artifacts.py
 ```
 
 Install the built wheel in a clean environment and smoke-test the installed package, not the checkout:
@@ -43,8 +51,8 @@ Review the generated changelog and planned releaseledger entry. Do not publish f
 Create and push the annotated tag only after the main branch checks are green:
 
 ```bash
-git tag -a v0.1.0 -m "ssmdconvert 0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "ssmdconvert 0.2.0"
+git push origin v0.2.0
 ```
 
 The publish workflow checks out the full tag history, builds from that tag, checks the distributions, installs and smoke-tests the wheel, and validates artifact filenames and metadata against the tag version. The wheel must contain `ssmdconvert/py.typed` without development-only files.
@@ -69,7 +77,7 @@ The workflow grants `id-token: write` only to the deployment job and publishes t
 Install the published version in a clean environment and check the CLI:
 
 ```bash
-python -m pip install --no-cache-dir ssmdconvert==0.1.0
+python -m pip install --no-cache-dir ssmdconvert==0.2.0
 ssmdconvert --version
 ssmdconvert --help
 ```

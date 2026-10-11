@@ -410,6 +410,7 @@ def analyze_ssmd_source(
         effective_languages=extracted.effective_languages,
         stored_sequence_fallback=stored_fallback,
         effective_sequence_fallback=effective_fallback,
+        include_titles=include_titles,
     )
     emit_progress(
         on_progress,

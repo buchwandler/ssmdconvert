@@ -3,7 +3,7 @@ schema_version: 2
 object_type: release
 versioning:
   schema_version: 1
-  revision: 3
+  revision: 7
 version: 0.2.0
 status: planned
 history_state: curated
@@ -17,7 +17,7 @@ boundary_ref: null
 source_refs:
   - tl:task-0011
 source_count: null
-entry_count: 2
+entry_count: 6
 artifact_count: 0
 git_base_ref: null
 git_base_sha: null

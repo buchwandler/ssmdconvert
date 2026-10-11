@@ -36,7 +36,6 @@ flags override the file, and the effective sequence policy takes final precedenc
 
 `book convert` defaults to `--speech-semantics freeze`: the selected chapters pass through the existing SSMD-aware `ttsready` analysis and safe automatic decisions are written as exact `sub` annotations. Visible source text is unchanged, aliases come from `ttsready`/`spokenform`, and existing author-owned `sub`, `as`, phoneme, language, and provider semantics remain authoritative. Freeze requires an effective language for each text run. Use `--language` for unscoped/base text when source metadata is absent or incorrect; inline SSMD language spans remain authoritative. Choose `--speech-semantics preserve` for structural-only output.
 
-
 Freeze and book conversion print terminal decision counts (applied, already authoritative, author-owned, unresolved). Use `--json` to emit the versioned freeze report to stdout or `--report PATH` to save it atomically. A successful bundle's manifest records the source hash, TTSReady and Spokenform versions, and preparation/runtime fingerprints. Preserve-mode bundles record `speech_semantics.status: preserved`; they never claim a complete freeze.
 
 `book convert` also accepts `--spacy off|auto|sm|md|lg|trf` and
@@ -83,7 +82,9 @@ The CLI infers formats only from `.ssmdbook` and `.ssmdbook.zip`. Use `--format 
 
 ```python
 from ssmdconvert import (
+    BookConversionOptions,
     BookWorkspace,
+    SpeechOptions,
     WorkspaceChapterStatus,
     convert_book,
     inspect_book,
@@ -95,7 +96,14 @@ from ssmdconvert import (
 )
 
 inspection = inspect_book("novel.epub")
-book = convert_book("novel.epub", chapters="2-20")
+result = convert_book(
+    "novel.epub",
+    options=BookConversionOptions(
+        chapters="2-20",
+        speech=SpeechOptions(mode="preserve"),
+    ),
+)
+book = result.book
 write_book_bundle(book, "selected.ssmdbook", format="directory")
 loaded = load_book_bundle("selected.ssmdbook")
 workspace: BookWorkspace = load_book_workspace("selected.ssmdbook")
@@ -104,8 +112,17 @@ refreshed_workspace: BookWorkspace = refresh_book_workspace("selected.ssmdbook")
 validate_book_bundle("selected.ssmdbook")
 ```
 
-`Book.source_sha256` is captured during conversion. Bundle writing persists that captured hash and does not reread the source file. After loading a bundle, source provenance remains available in `Book.source`, but its local `path` is `None`.
+`convert_book()` returns `BookConversionResult`; its `book`, `speech`, and
+`issues` are separate from bundle publication. `Book.source_sha256` is captured
+during conversion. Bundle writing persists that captured hash and does not
+reread the source file. After loading a bundle, source provenance remains
+available in `Book.source`, but its local `path` is `None`.
 
-`convert_book()` also accepts `language`, `metadata_overrides`, and `speech_semantics="freeze"` (the default). Pass `speech_semantics="preserve"` for structural-only conversion. The explicit language sets the base value over source and metadata-file values; inline SSMD language spans remain authoritative for scoped text. Freeze requires a resolvable effective language; the returned `Book.metadata` includes the effective language and portable metadata, and every chapter copies each supported portable SSMD key before SSMD 0.9 validation.
-
+Pass `language` and `metadata_overrides` through `BookConversionOptions`.
+`SpeechOptions(mode="freeze")` is the default and requires a resolvable
+language; choose `mode="preserve"` for structural-only conversion. The
+explicit language sets the base value over source metadata; inline SSMD
+language spans remain authoritative. The returned `Book.metadata` includes
+effective metadata, and each chapter copies supported portable SSMD keys
+before SSMD 0.9 validation.
 See [Bundle format](bundle-format.md) for manifest fields, canonical paths, integrity checks, and resource limits.

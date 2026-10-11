@@ -58,7 +58,6 @@ def test_obsolete_provenance_fields_are_not_exposed() -> None:
     assert "bundle_path" not in _field_names(BookChapter)
 
 
-
 def test_reviewed_ssmd_handoff_fixture_preserves_visible_text_and_aliases() -> None:
     fixture = Path(__file__).parent / "fixtures" / "ssmd-speech-handoff" / "reviewed.ssmd"
     analysis = analyze_ssmd_source(fixture)

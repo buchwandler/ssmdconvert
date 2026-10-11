@@ -16,6 +16,13 @@ ID. It does not invalidate context for edits to unrelated chapters. Mixed-langua
 paragraphs are rendered as whole paragraphs to keep language boundaries intact.
 
 `--paragraph` expands sentence context, `--json` returns the versioned context
-object, and `--bug-report` adds reproducibility fingerprints and unit text. The
-latter may contain source text; review it before sharing. See
-[Analysis cache](analysis-cache.md) for storage and freshness behavior.
+object. `--bug-report` adds reproducibility fingerprints and unit text; review it
+for sensitive content before sharing. See [Analysis cache](analysis-cache.md) for
+storage and freshness behavior.
+
+In Python, `lookup_change_context(analysis_or_report, change_id)` uses typed
+in-memory evidence directly and needs no prior report/cache. For persistence, use
+`analyze_cached(..., cache_root=...)` and the separately named
+`lookup_cached_context(source, change_id, cache_root=...)`; the latter validates
+freshness against the affected source chapter. Plain `analyze_ssmd()` does not
+read or write a cache. See the [Python API reference](api.md) for both paths.

@@ -255,9 +255,9 @@ def _unit_coverage(
             covered += 1
 
     reference_counts = Counter(referenced_ids)
-    duplicate_ids = {
-        unit_id for unit_id, count in unit_counts.items() if count > 1
-    } | {unit_id for unit_id, count in reference_counts.items() if count > 1}
+    duplicate_ids = {unit_id for unit_id, count in unit_counts.items() if count > 1} | {
+        unit_id for unit_id, count in reference_counts.items() if count > 1
+    }
     orphan_ids = set(unit_by_id) - set(referenced_ids)
     return UnitCoverage(
         narratable_contexts=len(narratable_contexts),

@@ -5,12 +5,14 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
 from click import unstyle
 from epub_support import make_epub
 from ssmd import parse_structure
 from typer.testing import CliRunner
 
-from ssmdconvert import load_book_bundle
+import ssmdconvert.cli as cli_module
+from ssmdconvert import BookConversionOptions, SpeechOptions, convert_book, load_book_bundle
 from ssmdconvert.cli import app
 
 runner = CliRunner()
@@ -377,6 +379,66 @@ def test_book_convert_json_report_and_file_report(tmp_path: Path) -> None:
     assert load_book_bundle(output).speech_semantics["status"] == "complete"
 
 
+def test_book_convert_cli_matches_public_api_result(tmp_path: Path) -> None:
+    source = tmp_path / "parity.epub"
+    output = tmp_path / "parity.ssmdbook"
+    make_epub(source, chapter_one_suffix=" Initiate in 3–2–1.")
+
+    api_result = convert_book(
+        source,
+        options=BookConversionOptions(speech=SpeechOptions(spacy="off")),
+    )
+    cli_result = runner.invoke(
+        app,
+        ["book", "convert", str(source), "--output", str(output), "--json"],
+    )
+
+    assert cli_result.exit_code == 0, cli_result.output
+    cli_report = json.loads(cli_result.output)
+    expected_report = api_result.speech.to_dict()
+    expected_report["output"] = str(output)
+    expected_report["chapter_count"] = len(api_result.book.chapters)
+    assert cli_report == expected_report
+    cli_book = load_book_bundle(output)
+    assert [chapter.id for chapter in cli_book.chapters] == [
+        chapter.id for chapter in api_result.book.chapters
+    ]
+    assert [chapter.ssmd for chapter in cli_book.chapters] == [
+        chapter.ssmd for chapter in api_result.book.chapters
+    ]
+
+
+def test_book_convert_report_write_failure_names_published_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "report-failure.epub"
+    output = tmp_path / "published.ssmdbook"
+    make_epub(source)
+
+    def fail_report_write(*args: object, **kwargs: object) -> None:
+        raise OSError("report disk full")
+
+    monkeypatch.setattr(cli_module, "_write_text_atomically", fail_report_write)
+    result = runner.invoke(
+        app,
+        [
+            "book",
+            "convert",
+            str(source),
+            "--output",
+            str(output),
+            "--report",
+            str(tmp_path / "report.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert output.is_dir()
+    assert "SSMD book bundle was published at" in result.output
+    assert "freeze report was not written to" in result.output
+    assert "Created SSMD book bundle" not in result.output
+
+
 def test_book_convert_language_failure_leaves_no_bundle_and_preserve_succeeds(
     tmp_path: Path,
 ) -> None:
@@ -389,7 +451,6 @@ def test_book_convert_language_failure_leaves_no_bundle_and_preserve_succeeds(
     assert failed.exit_code == 1
     assert "cannot freeze speech semantics" in failed.output
     assert not output.exists()
-
 
     report_output = tmp_path / "incomplete-book-report.json"
     failed_with_report = runner.invoke(

@@ -34,6 +34,9 @@ class ProjectedText:
     items: tuple[ProjectedItem, ...]
     stats: ProjectionStats
 
+    max_paragraph_chars: int | None = 1000
+    include_titles: bool = True
+
 
 def _prepare_context(
     analysis: SsmdAnalysis,
@@ -159,4 +162,10 @@ def project_txt(
         output_layout=OUTPUT_LAYOUT,
         prepared_output_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
     )
-    return ProjectedText(text=text, items=items, stats=stats)
+    return ProjectedText(
+        text=text,
+        items=items,
+        stats=stats,
+        max_paragraph_chars=max_paragraph_chars,
+        include_titles=include_titles,
+    )

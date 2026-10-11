@@ -14,7 +14,6 @@ normalizer. `--json` emits a versioned JSON result. `--fail-on-warning` returns 
 non-zero status when the audit contains warnings or errors. `--language`, chapter
 selection, fallback mode, and title inclusion control the analysis as in `report`.
 
-
 Human output and JSON include the same mapping counts: applied, already authoritative, author-owned, and unresolved. `--json` emits `ssmdconvert.speech-audit.v2`, including each change's final disposition and a `freeze_mapping` summary. The audit is read-only; an `applied` disposition means the exact mapping is safe to write, not that the audit changed the source.
 
 Audit is read-only. To materialize eligible changes into SSMD, use

@@ -78,11 +78,8 @@ class UnitCoverage:
 
     @property
     def complete(self) -> bool:
-        return (
-            self.covered_contexts == self.narratable_contexts
-            and not (
-                self.uncovered_context_ids or self.duplicate_unit_ids or self.orphan_unit_ids
-            )
+        return self.covered_contexts == self.narratable_contexts and not (
+            self.uncovered_context_ids or self.duplicate_unit_ids or self.orphan_unit_ids
         )
 
 
@@ -133,6 +130,7 @@ class SsmdAnalysis:
     effective_languages: tuple[str, ...]
     stored_sequence_fallback: str | None
     effective_sequence_fallback: Literal["preserve", "spell"]
+    include_titles: bool = True
 
 
 @dataclass(frozen=True, slots=True)

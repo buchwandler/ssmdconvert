@@ -90,6 +90,7 @@ def build_preserved_speech_report(source_sha256: str) -> dict[str, Any]:
         "issues": [],
     }
 
+
 def _change_record(change: SsmdMappedChange) -> dict[str, Any]:
     return {
         "id": change.change.id,

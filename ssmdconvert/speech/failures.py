@@ -21,11 +21,13 @@ class SpeechFreezeFailure(MaterializationError):
         analysis: SsmdAnalysis,
         changes: tuple[SsmdMappedChange, ...],
         summary: SpeechFreezeSummary,
+        report: dict[str, object],
     ) -> None:
         super().__init__(message)
         self.analysis = analysis
         self.changes = changes
         self.summary = summary
+        self.report = report
 
 
 def make_speech_freeze_failure(analysis: SsmdAnalysis, message: str) -> SpeechFreezeFailure:
@@ -41,9 +43,13 @@ def make_speech_freeze_failure(analysis: SsmdAnalysis, message: str) -> SpeechFr
         for change in mapped
     )
     summary = replace(summarize_changes(changes), status="incomplete")
+    from .reporting import build_speech_freeze_report
+
+    report = build_speech_freeze_report(analysis, changes, summary, failure=message)
     return SpeechFreezeFailure(
         message,
         analysis=analysis,
         changes=changes,
         summary=summary,
+        report=report,
     )

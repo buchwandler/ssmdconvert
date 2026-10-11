@@ -6,8 +6,9 @@ import pytest
 from epub_support import make_epub
 from ssmd import parse_structure
 
-from ssmdconvert import ConversionResult, Converter, convert_book
+from ssmdconvert import ConversionResult, Converter
 from ssmdconvert._epub import _chapter_markdown_options, load_epub
+from ssmdconvert.books import convert_book
 from ssmdconvert.errors import SSMDConvertError
 
 

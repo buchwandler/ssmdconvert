@@ -18,13 +18,13 @@ from ssmdconvert import (
     BookBundleValidationError,
     BookWorkspace,
     WorkspaceChapterStatus,
-    convert_book,
     load_book_bundle,
     load_book_workspace,
     refresh_book_workspace,
     validate_book_bundle,
     write_book_bundle,
 )
+from ssmdconvert.books import convert_book
 
 
 def _book(tmp_path: Path):
@@ -113,8 +113,6 @@ def test_directory_and_zip_roundtrip_and_equivalence(tmp_path: Path) -> None:
     assert load_book_bundle(repacked).chapters == from_directory.chapters
 
 
-
-
 def test_speech_semantics_provenance_roundtrips_in_both_bundle_formats(tmp_path: Path) -> None:
     source, complete_book = _book(tmp_path)
     preserved_book = convert_book(source, speech_semantics="preserve")
@@ -137,6 +135,7 @@ def test_speech_semantics_provenance_roundtrips_in_both_bundle_formats(tmp_path:
             _assert_same_book(book, loaded)
             assert loaded.speech_semantics == book.speech_semantics
             assert loaded.speech_semantics["status"] == label
+
 
 def test_source_hash_is_captured_before_bundle_write(tmp_path: Path) -> None:
     source, book = _book(tmp_path)

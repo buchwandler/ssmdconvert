@@ -3,15 +3,15 @@ schema_version: 2
 object_type: release
 versioning:
   schema_version: 1
-  revision: 2
+  revision: 3
 version: 0.1.5
-status: planned
+status: canceled
 history_state: curated
 title: ssmdconvert 0.1.5
 released_at: null
 previous_version: 0.1.4
-cancel_reason: null
-superseded_by: null
+cancel_reason: Planned 0.1.5 work is consolidated into v0.2.0; 0.1.5 was never shipped.
+superseded_by: 0.2.0
 changelog_file: docs/changelog.md
 boundary_ref: null
 source_refs: []

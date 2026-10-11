@@ -8,21 +8,35 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, replace
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import typer
 
 from . import __version__
-from .analysis.cache import analyze_with_cache
-from .analysis.context import lookup_context, render_context
-from .analysis.prepare import analyze_ssmd_source
-from .analysis.projection import project_txt
-from .analysis.reporting import (
-    render_json_report,
-    render_markdown_report,
-    report_to_dict,
+from .analysis.context import render_context
+from .analysis.reporting import render_json_report, render_markdown_report, report_to_dict
+from .api import (
+    analyze_cached as analyze_cached_api,
 )
-from .books import convert_book, inspect_book
+from .api import (
+    analyze_ssmd as analyze_ssmd_api,
+)
+from .api import (
+    audit_speech as audit_speech_api,
+)
+from .api import (
+    convert_book as convert_book_api,
+)
+from .api import (
+    convert_document,
+    inspect_document,
+    lookup_cached_context,
+    project_text,
+)
+from .api import (
+    freeze_speech as freeze_speech_api,
+)
+from .books import inspect_book
 from .bundle import (
     _publish_path_no_replace,
     load_book_bundle,
@@ -33,17 +47,25 @@ from .bundle import (
 )
 from .cli_help import AdaptiveTyper, AdaptiveTyperGroup
 from .converter import Converter
-from .errors import SSMDConvertError
-from .linguistics import LinguisticsConfig, SpacyPolicy
+from .errors import BookError, SSMDConvertError
+from .linguistics import SpacyPolicy
 from .metadata import load_metadata_file
+from .options import (
+    AnalysisOptions,
+    BookConversionOptions,
+    DocumentConversionOptions,
+    SpeechOptions,
+    TextProjectionOptions,
+)
 from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SpeechSemanticsMode
 from .progress import ProgressCallback, ProgressEvent
-from .speech.audit import audit_ssmd
-from .speech.conversion import materialize_book_speech
-from .speech.failures import SpeechFreezeFailure, make_speech_freeze_failure
+from .speech.failures import SpeechFreezeFailure
 from .speech.provenance import build_speech_provenance
-from .speech.reporting import build_preserved_speech_report, build_speech_freeze_report
-from .speech.workflows import materialize_analysis, summarize_changes
+from .speech.workflows import summarize_changes
+
+if TYPE_CHECKING:
+    from .analysis.models import SsmdAnalysis
+    from .analysis.projection import ProjectedText
 
 app = AdaptiveTyper(
     cls=AdaptiveTyperGroup,
@@ -285,10 +307,6 @@ def _run_with_cli_progress(
     reporter.success(success_message)
 
 
-def _linguistics_config(policy: SpacyPolicy) -> LinguisticsConfig:
-    return LinguisticsConfig(policy)
-
-
 def _output_path(path: Path) -> Path:
     absolute = Path(os.path.abspath(path.expanduser()))
     return absolute.parent.resolve() / absolute.name
@@ -350,8 +368,6 @@ def _write_text_atomically(
             temporary.unlink(missing_ok=True)
     finally:
         temporary.unlink(missing_ok=True)
-
-
 
 
 def _preflight_report_output(
@@ -421,6 +437,7 @@ def _render_freeze_summary(
         lines.append(f"Failure: {report['failure']}")
     return "\n".join(lines)
 
+
 def _book_output_format(
     destination: Path,
     requested: str | None,
@@ -452,7 +469,7 @@ def _speech_materialize_to_destination(
     sequence_fallback_mode: SequenceFallbackModeOption,
     force: bool,
     bundle_format: str | None,
-    linguistics: LinguisticsConfig,
+    spacy: SpacyPolicy,
     on_progress: ProgressCallback,
     report_output: Path | None = None,
     json_output: bool = False,
@@ -465,12 +482,14 @@ def _speech_materialize_to_destination(
         output=destination,
         force=force,
     )
-    analysis = analyze_ssmd_source(
+    analysis = analyze_ssmd_api(
         source,
-        chapters=chapters,
-        language=language,
-        sequence_fallback_mode=sequence_fallback_mode.value,
-        linguistics=linguistics,
+        options=AnalysisOptions(
+            chapters=chapters,
+            language=language,
+            sequence_fallback_mode=sequence_fallback_mode.value,
+            spacy=spacy,
+        ),
         on_progress=on_progress,
     )
     if bundle_format is not None and analysis.source.kind != "ssmdbook":
@@ -483,28 +502,20 @@ def _speech_materialize_to_destination(
     from .bundle import read_current_chapter_bytes
 
     try:
-        materialized = materialize_analysis(analysis)
-    except Exception as exc:
-        failure = make_speech_freeze_failure(analysis, str(exc))
+        frozen = freeze_speech_api(analysis)
+    except SpeechFreezeFailure as failure:
         if report_destination is not None or json_output:
-            try:
-                failure_report = build_speech_freeze_report(
-                    failure.analysis,
-                    failure.changes,
-                    failure.summary,
-                    failure=str(failure),
-                )
-                failure_report["output"] = None
-                _publish_speech_report(
-                    failure_report,
-                    report_destination=report_destination,
-                    source=source,
-                    force=force,
-                    json_output=json_output,
-                )
-            except Exception:
-                pass
-        raise failure from exc
+            failure_report = dict(failure.report)
+            failure_report["output"] = None
+            failure_report["chapter_count"] = len(analysis.sections)
+            _publish_speech_report(
+                failure_report,
+                report_destination=report_destination,
+                source=source,
+                force=force,
+                json_output=json_output,
+            )
+        raise
 
     for section in analysis.sections:
         current = _canonical_ssmd_bytes(read_current_chapter_bytes(source, section.id))
@@ -518,7 +529,7 @@ def _speech_materialize_to_destination(
     if analysis.source.kind == "ssmd":
         section = analysis.sections[0]
         _write_text_atomically(
-            materialized.section_ssmd[section.id],
+            frozen.sections[section.id],
             destination,
             source=source,
             force=force,
@@ -541,7 +552,7 @@ def _speech_materialize_to_destination(
         updated_book = replace(
             book,
             chapters=tuple(
-                replace(chapter, ssmd=materialized.section_ssmd.get(chapter.id, chapter.ssmd))
+                replace(chapter, ssmd=frozen.sections.get(chapter.id, chapter.ssmd))
                 for chapter in book.chapters
             ),
             speech_semantics=build_speech_provenance(
@@ -557,19 +568,28 @@ def _speech_materialize_to_destination(
             overwrite=force,
         )
 
-    report = build_speech_freeze_report(
-        analysis,
-        materialized.changes,
-        materialized.summary,
-    )
+    report = frozen.speech.to_dict()
     report["output"] = str(destination)
-    _publish_speech_report(
-        report,
-        report_destination=report_destination,
-        source=source,
-        force=force,
-        json_output=json_output,
-    )
+    try:
+        _publish_speech_report(
+            report,
+            report_destination=report_destination,
+            source=source,
+            force=force,
+            json_output=json_output,
+        )
+    except Exception as exc:
+        failed_outputs = []
+        if report_destination is not None:
+            failed_outputs.append(
+                f"freeze report was not written to {_output_path(report_destination)}"
+            )
+        if json_output:
+            failed_outputs.append("freeze report could not be written to stdout")
+        requested = " and ".join(failed_outputs) or "requested report output failed"
+        raise BookError(
+            f"SSMD speech artifact was published at {destination}, but {requested}: {exc}"
+        ) from exc
     return destination, report
 
 
@@ -625,25 +645,6 @@ def _render_speech_audit(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_speech_audit(payload: dict[str, Any]) -> str:
-    lines = [f"Speech audit: {payload['source']['path']}", ""]
-    for change in payload["changes"]:
-        section = f"{change['section_index']:04d} {change.get('section_title') or '(untitled)'}"
-        paragraph = "title" if change["is_title"] else str(change["paragraph_index"])
-        lines.append(
-            f"{section} / {paragraph}: {change['source']} -> {change['replacement']} "
-            f"[{change.get('rule') or 'no rule'}; {change['ssmd']['mapping_status']}]"
-        )
-    if not payload["changes"]:
-        lines.append("No automatic speech changes.")
-    if payload["issues"]:
-        lines.extend(["", "Issues:"])
-        lines.extend(
-            f"{item['severity']}: {item['code']}: {item['message']}" for item in payload["issues"]
-        )
-    return "\n".join(lines) + "\n"
-
-
 @app.command()  # type: ignore[untyped-decorator]
 def convert(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
@@ -666,15 +667,17 @@ def convert(
     """Convert a supported input into one SSMD document."""
 
     def run() -> None:
-        result = Converter().convert(
+        result = convert_document(
             source,
-            title=title,
-            author=author,
-            language=language,
-            metadata_overrides=(
-                load_metadata_file(metadata_file) if metadata_file is not None else None
+            options=DocumentConversionOptions(
+                title=title,
+                author=author,
+                language=language,
+                metadata_overrides=(
+                    load_metadata_file(metadata_file) if metadata_file is not None else {}
+                ),
+                sequence_fallback_mode=sequence_fallback_mode.value,
             ),
-            sequence_fallback_mode=sequence_fallback_mode.value,
         )
         destination = output or source.with_suffix(".ssmd")
         _write_text_atomically(result.ssmd, destination, source=source, force=force)
@@ -693,7 +696,7 @@ def inspect(
     def run() -> None:
         converter = Converter()
         adapter = converter.adapter_for(source)
-        document = converter.load(source)
+        document = inspect_document(source)
         payload = {
             "source": str(source),
             "adapter": adapter.name,
@@ -729,24 +732,28 @@ def _analyze_projection(
     sequence_fallback_mode: SequenceFallbackModeOption,
     max_paragraph_chars: int,
     include_titles: bool,
-    linguistics: LinguisticsConfig,
+    spacy: SpacyPolicy,
     on_progress: ProgressCallback,
-):
+) -> tuple[SsmdAnalysis, ProjectedText]:
     if max_paragraph_chars < 1:
         raise ValueError("--max-paragraph-chars must be at least 1")
-    analysis = analyze_ssmd_source(
+    analysis = analyze_ssmd_api(
         source,
-        chapters=chapters,
-        language=language,
-        sequence_fallback_mode=sequence_fallback_mode.value,
-        include_titles=include_titles,
-        linguistics=linguistics,
+        options=AnalysisOptions(
+            chapters=chapters,
+            language=language,
+            sequence_fallback_mode=sequence_fallback_mode.value,
+            include_titles=include_titles,
+            spacy=spacy,
+        ),
         on_progress=on_progress,
     )
-    projection = project_txt(
+    projection = project_text(
         analysis,
-        max_paragraph_chars=max_paragraph_chars,
-        include_titles=include_titles,
+        options=TextProjectionOptions(
+            max_paragraph_chars=max_paragraph_chars,
+            include_titles=include_titles,
+        ),
     )
     return analysis, projection
 
@@ -799,15 +806,20 @@ def report(
     """Report SSMD-aware preparation, source context, and TXT projection statistics."""
 
     def run(on_progress: ProgressCallback) -> None:
-        cached = analyze_with_cache(
+        cached = analyze_cached_api(
             source,
-            chapters=chapters,
-            language=language,
-            sequence_fallback_mode=sequence_fallback_mode.value,
-            include_titles=include_titles,
-            max_paragraph_chars=max_paragraph_chars,
+            options=AnalysisOptions(
+                chapters=chapters,
+                language=language,
+                sequence_fallback_mode=sequence_fallback_mode.value,
+                include_titles=include_titles,
+                spacy=spacy,
+            ),
+            projection_options=TextProjectionOptions(
+                max_paragraph_chars=max_paragraph_chars,
+                include_titles=include_titles,
+            ),
             refresh=refresh,
-            linguistics=_linguistics_config(spacy),
             on_progress=on_progress,
         )
         analysis_report = cached.report
@@ -841,7 +853,7 @@ def context(
     """Show source and spoken context for one cached generic change ID."""
 
     def run() -> None:
-        result = lookup_context(
+        result = lookup_cached_context(
             source,
             change_id,
             paragraph=paragraph,
@@ -890,7 +902,7 @@ def txt(
             sequence_fallback_mode=sequence_fallback_mode,
             max_paragraph_chars=max_paragraph_chars,
             include_titles=include_titles,
-            linguistics=_linguistics_config(spacy),
+            spacy=spacy,
             on_progress=on_progress,
         )
         if output is None:
@@ -929,15 +941,18 @@ def speech_audit(
     """Audit SSMD speech changes, per-change dispositions, and mapping summary counts."""
 
     def run(on_progress: ProgressCallback) -> None:
-        report = audit_ssmd(
+        analysis = analyze_ssmd_api(
             source,
-            chapters=chapters,
-            language=language,
-            sequence_fallback_mode=sequence_fallback_mode.value,
-            include_titles=include_titles,
-            linguistics=_linguistics_config(spacy),
+            options=AnalysisOptions(
+                chapters=chapters,
+                language=language,
+                sequence_fallback_mode=sequence_fallback_mode.value,
+                include_titles=include_titles,
+                spacy=spacy,
+            ),
             on_progress=on_progress,
         )
+        report = audit_speech_api(analysis)
         payload = _speech_audit_payload(report)
         if json_output:
             typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False))
@@ -961,7 +976,7 @@ def _run_speech_materialization_command(
     sequence_fallback_mode: SequenceFallbackModeOption,
     force: bool,
     bundle_format: str | None,
-    linguistics: LinguisticsConfig,
+    spacy: SpacyPolicy,
     progress: bool | None,
     report_output: Path | None = None,
     json_output: bool = False,
@@ -975,7 +990,7 @@ def _run_speech_materialization_command(
             sequence_fallback_mode=sequence_fallback_mode,
             force=force,
             bundle_format=bundle_format,
-            linguistics=linguistics,
+            spacy=spacy,
             on_progress=on_progress,
             report_output=report_output,
             json_output=json_output,
@@ -987,6 +1002,7 @@ def _run_speech_materialization_command(
                 typer.echo(f"Freeze report: {_output_path(report_output)}")
 
     _run_with_cli_progress(progress, run, f"{command} SSMD materialized")
+
 
 @speech_app.command("annotate")  # type: ignore[untyped-decorator]
 def speech_annotate(
@@ -1022,7 +1038,7 @@ def speech_annotate(
         sequence_fallback_mode=sequence_fallback_mode,
         force=force,
         bundle_format=bundle_format,
-        linguistics=_linguistics_config(spacy),
+        spacy=spacy,
         progress=progress,
     )
 
@@ -1068,7 +1084,7 @@ def speech_freeze(
         sequence_fallback_mode=sequence_fallback_mode,
         force=force,
         bundle_format=bundle_format,
-        linguistics=_linguistics_config(spacy),
+        spacy=spacy,
         progress=progress,
         report_output=report_output,
         json_output=json_output,
@@ -1270,58 +1286,41 @@ def book_convert(
             force=force,
         )
         selected_format = _book_output_format(destination, bundle_format)
-        book = convert_book(
-            source,
-            chapters=chapters,
-            language=language,
-            metadata_overrides=(
-                load_metadata_file(metadata_file) if metadata_file is not None else None
-            ),
-            sequence_fallback_mode=sequence_fallback_mode.value,
-            speech_semantics="preserve",
-            linguistics=_linguistics_config(spacy),
-            on_progress=on_progress,
-        )
-        if speech_semantics == "freeze":
-            try:
-                frozen = materialize_book_speech(
-                    book,
-                    source_path=source,
+        try:
+            result = convert_book_api(
+                source,
+                options=BookConversionOptions(
+                    chapters=chapters,
                     language=language,
+                    metadata_overrides=(
+                        load_metadata_file(metadata_file) if metadata_file is not None else {}
+                    ),
                     sequence_fallback_mode=sequence_fallback_mode.value,
-                    linguistics=_linguistics_config(spacy),
-                    on_progress=on_progress,
-                )
-            except SpeechFreezeFailure as failure:
-                if report_destination is not None or json_output:
-                    try:
-                        failure_report = build_speech_freeze_report(
-                            failure.analysis,
-                            failure.changes,
-                            failure.summary,
-                            failure=str(failure),
-                        )
-                        failure_report["output"] = None
-                        failure_report["chapter_count"] = len(book.chapters)
-                        _publish_speech_report(
-                            failure_report,
-                            report_destination=report_destination,
-                            source=source,
-                            force=force,
-                            json_output=json_output,
-                        )
-                    except Exception:
-                        pass
-                raise
-            book = frozen.book
-            report = build_speech_freeze_report(
-                frozen.analysis,
-                frozen.materialization.changes,
-                frozen.materialization.summary,
+                    speech=SpeechOptions(mode=speech_semantics, spacy=spacy),
+                ),
+                on_progress=on_progress,
             )
-        else:
-            report = build_preserved_speech_report(book.source_sha256)
+        except SpeechFreezeFailure as failure:
+            if report_destination is not None or json_output:
+                failure_report = dict(failure.report)
+                failure_report["output"] = None
+                failure_report["chapter_count"] = len(failure.analysis.sections)
+                json.dumps(failure_report, ensure_ascii=False, indent=2, allow_nan=False)
+                _publish_speech_report(
+                    failure_report,
+                    report_destination=report_destination,
+                    source=source,
+                    force=force,
+                    json_output=json_output,
+                )
+            raise
 
+        book = result.book
+        report = result.speech.to_dict()
+        report["output"] = str(_output_path(destination))
+        report["chapter_count"] = len(book.chapters)
+        # Validate report serialization before publishing the bundle.
+        json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
         written = write_book_bundle(
             book,
             destination,
@@ -1329,14 +1328,26 @@ def book_convert(
             overwrite=force,
         )
         report["output"] = str(written)
-        report["chapter_count"] = len(book.chapters)
-        _publish_speech_report(
-            report,
-            report_destination=report_destination,
-            source=source,
-            force=force,
-            json_output=json_output,
-        )
+        try:
+            _publish_speech_report(
+                report,
+                report_destination=report_destination,
+                source=source,
+                force=force,
+                json_output=json_output,
+            )
+        except Exception as exc:
+            failed_outputs = []
+            if report_destination is not None:
+                failed_outputs.append(
+                    f"freeze report was not written to {_output_path(report_destination)}"
+                )
+            if json_output:
+                failed_outputs.append("freeze report could not be written to stdout")
+            requested = " and ".join(failed_outputs) or "requested report output failed"
+            raise BookError(
+                f"SSMD book bundle was published at {written}, but {requested}: {exc}"
+            ) from exc
         if not json_output:
             typer.echo(f"Created SSMD book bundle: {written}")
             typer.echo(f"Chapters: {len(book.chapters)}")

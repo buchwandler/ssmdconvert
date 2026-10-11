@@ -137,7 +137,7 @@ def main() -> None:
         if "five kilograms" not in _run(workdir, "txt", str(ssmd_source)):
             raise RuntimeError("installed TXT command omitted prepared speech text")
         audit = json.loads(_run(workdir, "speech", "audit", str(ssmd_source), "--json"))
-        if audit.get("schema") != "ssmdconvert.speech-audit.v1":
+        if audit.get("schema") != "ssmdconvert.speech-audit.v2":
             raise RuntimeError("installed speech audit returned an unexpected result")
         annotated = workdir / "annotated.ssmd"
         frozen = workdir / "frozen.ssmd"

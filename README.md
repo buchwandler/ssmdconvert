@@ -146,37 +146,38 @@ all command options, and migration from the removed `ttsready` CLI are in the
 
 ## Python API
 
+The v0.2 facade uses immutable options and typed results. `convert_book()` returns a `BookConversionResult`; publication is explicit.
+
 ```python
 from ssmdconvert import (
-    convert,
-    convert_content,
-    BookWorkspace,
-    WorkspaceChapterStatus,
+    AnalysisOptions,
+    BookConversionOptions,
+    DocumentConversionOptions,
+    SpeechOptions,
+    analyze_ssmd,
     convert_book,
+    convert_content,
+    convert_document,
     inspect_book,
     load_book_bundle,
-    load_book_workspace,
-    refresh_book_workspace,
-    validate_book_bundle,
     write_book_bundle,
 )
 
-result = convert("manuscript.md")
-content = convert_content("# Notes\n\nRead this.", input_format="markdown", source_name="notes.md")
-inspection = inspect_book("novel.epub")
-book = convert_book(
-    "novel.epub",
-    chapters="2-20",
-    language="de-DE",
-    speech_semantics="freeze",
-    metadata_overrides={"voice_defaults": {"narrator": {"rate": "slow"}}},
+document = convert_document(
+    "manuscript.md",
+    options=DocumentConversionOptions(language="en-US"),
 )
-write_book_bundle(book, "selected.ssmdbook", format="directory")
-loaded = load_book_bundle("selected.ssmdbook")
-workspace = load_book_workspace("novel.ssmdbook")
-workspace_status: WorkspaceChapterStatus = workspace.chapters[0]
-refreshed_workspace: BookWorkspace = refresh_book_workspace("novel.ssmdbook")
-validate_book_bundle("selected.ssmdbook")
+content = convert_content("# Notes", input_format="markdown", source_name="notes.md")
+inspection = inspect_book("novel.epub")
+book_result = convert_book(
+    "novel.epub",
+    options=BookConversionOptions(speech=SpeechOptions(mode="preserve")),
+)
+analysis = analyze_ssmd(book_result, options=AnalysisOptions(spacy="off"))
+write_book_bundle(book_result.book, "novel.ssmdbook", format="directory")
+loaded = load_book_bundle("novel.ssmdbook")
 ```
+
+The root-level `convert()` alias was removed. See the [Python API reference](docs/api.md) and [v0.2 migration guide](docs/migration-to-v0.2.md) for option mappings, analysis/report/TXT workflows, explicit cache behavior, and bundle/workspace APIs.
 
 See the [documentation](docs/index.md) for supported inputs, CLI options, book models, and bundle validation details.

@@ -266,8 +266,6 @@ def test_existing_author_sub_is_never_materialized_again(tmp_path: Path) -> None
     assert result.ssmd.count("{sub=") == 1
 
 
-
-
 def test_different_author_sub_remains_the_final_authority(tmp_path: Path) -> None:
     source = _document('[5 kg]{sub="five kilos"}.')
     path = tmp_path / "manual.ssmd"
@@ -350,6 +348,7 @@ def test_author_owned_speech_attributes_receive_explicit_disposition(
     assert result.changes[0].materialization_status == "author-owned"
     assert result.summary.author_owned == 1
     assert result.summary.complete
+
 
 def test_escaped_automatic_change_remains_reportable_but_cannot_be_written(
     tmp_path: Path,
