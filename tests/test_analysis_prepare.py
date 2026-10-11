@@ -62,7 +62,7 @@ def test_inline_language_scopes_create_plain_explicit_language_runs(tmp_path: Pa
     assert extracted.contexts[1].unit_ids == tuple(unit.id for unit in extracted.units[1:4])
 
 
-def test_inline_language_is_explicit_and_cli_language_overrides_annotation(tmp_path: Path) -> None:
+def test_inline_language_scopes_remain_authoritative_over_cli_base_override(tmp_path: Path) -> None:
     path = _write_source(
         tmp_path,
         'English [bonjour]{lang="fr-FR"} end.',
@@ -76,8 +76,36 @@ def test_inline_language_is_explicit_and_cli_language_overrides_annotation(tmp_p
         "fr-FR",
         "en-US",
     ]
-    assert [unit.language for unit in overridden.units if unit.role == "prose"] == ["de-DE"]
-    assert overridden.units[-1].text == "English bonjour end."
+    assert overridden.units[0].role == "title"
+    assert overridden.units[0].language == "de-DE"
+    assert [unit.language for unit in overridden.units if unit.role == "prose"] == [
+        "de-DE",
+        "fr-FR",
+        "de-DE",
+    ]
+    assert (
+        "".join(unit.text for unit in overridden.units if unit.role == "prose")
+        == "English bonjour end."
+    )
+
+
+def test_innermost_nested_language_annotation_beats_base_override(tmp_path: Path) -> None:
+    path = _write_source(
+        tmp_path,
+        'Before [outer [bonjour]{lang="fr-FR"} after]{lang="de-DE"} end.',
+    )
+
+    extracted = extract_units(load_ssmd_source(path), language="it-IT")
+    prose = [unit for unit in extracted.units if unit.role == "prose"]
+
+    assert [unit.language for unit in prose] == [
+        "it-IT",
+        "de-DE",
+        "fr-FR",
+        "de-DE",
+        "it-IT",
+    ]
+    assert [unit.text for unit in prose] == ["Before ", "outer ", "bonjour", " after", " end."]
 
 
 def test_missing_language_is_structured_and_never_defaults_to_english(tmp_path: Path) -> None:

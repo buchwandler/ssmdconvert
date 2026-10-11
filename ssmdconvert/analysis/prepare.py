@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import ttsready
 
 from ..errors import AnalysisError
+from ..linguistics import LinguisticModelSelection, LinguisticResourcePool, LinguisticsConfig
 from ..policy import DEFAULT_SEQUENCE_FALLBACK_MODE, validate_sequence_fallback_mode
+from ..progress import ProgressCallback, ProgressCallbackFailure, emit_progress
 from .models import (
     LoadedSsmdSource,
     SsmdAnalysis,
@@ -134,6 +136,127 @@ def _unit_locators(extraction: UnitExtraction) -> dict[str, SsmdUnitLocator]:
     return locators
 
 
+def _resolve_linguistics(
+    units: tuple[ttsready.TextUnit, ...],
+    config: LinguisticsConfig,
+    pool: LinguisticResourcePool,
+    on_progress: ProgressCallback | None,
+) -> dict[str, LinguisticModelSelection]:
+    languages = tuple(dict.fromkeys(unit.language for unit in units))
+    emit_progress(
+        on_progress,
+        "phase.started",
+        "linguistics.resolve",
+        completed=0,
+        total=len(languages),
+    )
+    selections = {
+        language: pool.resolve(language, config, on_progress=on_progress) for language in languages
+    }
+    fallbacks = {
+        language: selection.fallback_reason
+        for language, selection in selections.items()
+        if selection.fallback_reason is not None
+    }
+    emit_progress(
+        on_progress,
+        "phase.completed",
+        "linguistics.resolve",
+        completed=len(languages),
+        total=len(languages),
+        details={
+            "fallbacks": fallbacks,
+            "models": {
+                language: selection.cache_identity() for language, selection in selections.items()
+            },
+        },
+    )
+    return selections
+
+
+def _enrich_linguistic_units(
+    units: tuple[ttsready.TextUnit, ...],
+    selections: Mapping[str, LinguisticModelSelection],
+    pool: LinguisticResourcePool,
+    on_progress: ProgressCallback | None,
+    *,
+    completed_offset: int = 0,
+    progress_total: int | None = None,
+) -> tuple[ttsready.TextUnit, ...]:
+    total = progress_total if progress_total is not None else len(units)
+    emit_progress(
+        on_progress,
+        "phase.started",
+        "linguistics.enrichment",
+        completed=completed_offset,
+        total=total,
+    )
+    enriched: list[ttsready.TextUnit] = []
+    for index, unit in enumerate(units):
+        selection = selections[unit.language]
+        if selection.provider == "spacy":
+            emit_progress(
+                on_progress,
+                "unit.started",
+                "linguistics.enrichment",
+                completed=completed_offset + index,
+                total=total,
+                unit_id=unit.id,
+                language=unit.language,
+                provider=selection.provider,
+                model=selection.model,
+            )
+            tokens = pool.analyze_text(unit.text, selection, on_progress=on_progress)
+            unit = replace(unit, linguistic_tokens=tokens)
+            emit_progress(
+                on_progress,
+                "unit.completed",
+                "linguistics.enrichment",
+                completed=completed_offset + index + 1,
+                total=total,
+                unit_id=unit.id,
+                language=unit.language,
+                provider=selection.provider,
+                model=selection.model,
+            )
+        enriched.append(unit)
+    emit_progress(
+        on_progress,
+        "phase.completed",
+        "linguistics.enrichment",
+        completed=completed_offset + len(units),
+        total=total,
+    )
+    return tuple(enriched)
+
+
+def _preparation_progress(
+    callback: ProgressCallback | None,
+    *,
+    completed_offset: int = 0,
+    progress_total: int | None = None,
+) -> Callable[[Any], None] | None:
+    if callback is None:
+        return None
+
+    def forward(event: Any) -> None:
+        try:
+            emit_progress(
+                callback,
+                event.kind,
+                "speech.prepare",
+                completed=completed_offset + event.completed,
+                total=progress_total if progress_total is not None else event.total,
+                unit_id=event.unit_id,
+                language=event.language,
+                details={"role": event.role},
+            )
+        except BaseException as exc:
+            raise ProgressCallbackFailure(exc) from exc
+
+    return forward
+
+
 def analyze_ssmd_source(
     source: str | Path | LoadedSsmdSource,
     *,
@@ -147,8 +270,11 @@ def analyze_ssmd_source(
     pronunciations: Mapping[str, str] | None = None,
     unit_extraction: UnitExtraction | None = None,
     prepared_result: ttsready.PreparationResult | None = None,
+    linguistics: LinguisticsConfig | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> SsmdAnalysis:
     """Analyze the selected SSMD sections through public ttsready 0.2 APIs."""
+    emit_progress(on_progress, "phase.started", "analysis")
     loaded = source if isinstance(source, LoadedSsmdSource) else load_ssmd_source(source)
 
     selected = select_sections(loaded, chapters)
@@ -161,6 +287,9 @@ def analyze_ssmd_source(
     )
     if tuple(extracted.structures) != tuple(section.id for section in selected):
         raise AnalysisError("pre-extracted SSMD units do not match the selected sections")
+    selected_linguistics = linguistics or LinguisticsConfig()
+    if not isinstance(selected_linguistics, LinguisticsConfig):
+        raise TypeError("linguistics must be a LinguisticsConfig")
     stored_fallback, effective_fallback, fallback_issues = _stored_sequence_fallback(
         extracted,
         loaded,
@@ -176,19 +305,37 @@ def analyze_ssmd_source(
         *_pronunciation_overrides(pronunciations or {}),
     )
     if prepared_result is None:
-        # Conversion shares this override-aware, review-capable path.
-        # prepare_run is not equivalent yet.
+        pool = LinguisticResourcePool()
+        selections = _resolve_linguistics(extracted.units, selected_linguistics, pool, on_progress)
+        prepared_units = _enrich_linguistic_units(extracted.units, selections, pool, on_progress)
+        emit_progress(
+            on_progress,
+            "phase.started",
+            "speech.prepare",
+            completed=0,
+            total=len(prepared_units),
+        )
         try:
             preparation = ttsready.prepare_units(
-                extracted.units,
+                prepared_units,
                 overrides=all_overrides,
                 profile=active_profile,
                 strict=False,
+                on_progress=_preparation_progress(on_progress, progress_total=len(prepared_units)),
             )
+        except ProgressCallbackFailure as exc:
+            raise exc.original from exc
         except Exception as exc:
             raise AnalysisError(
                 f"ttsready could not prepare the selected SSMD text: {exc}"
             ) from exc
+        emit_progress(
+            on_progress,
+            "phase.completed",
+            "speech.prepare",
+            completed=len(prepared_units),
+            total=len(prepared_units),
+        )
     else:
         expected_unit_ids = tuple(unit.id for unit in extracted.units)
         actual_unit_ids = tuple(unit.unit_id for unit in prepared_result.units)
@@ -250,7 +397,7 @@ def analyze_ssmd_source(
         )
 
     unit_locators = _unit_locators(extracted)
-    return SsmdAnalysis(
+    analysis = SsmdAnalysis(
         source=loaded,
         sections=selected,
         structures=extracted.structures,
@@ -263,3 +410,11 @@ def analyze_ssmd_source(
         stored_sequence_fallback=stored_fallback,
         effective_sequence_fallback=effective_fallback,
     )
+    emit_progress(
+        on_progress,
+        "phase.completed",
+        "analysis",
+        completed=len(extracted.units),
+        total=len(extracted.units),
+    )
+    return analysis

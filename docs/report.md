@@ -16,9 +16,13 @@ Output is Markdown to stdout unless `--format json` is selected or `-o` names a
 Common options:
 
 - `--chapters SELECTOR`: source chapter numbers for SSMD books; defaults to all.
-- `--language LANG`: explicit language override; unresolved language is reported,
-  never silently defaulted.
+- `--language LANG`: base-language override for unscoped text; inline language scopes remain authoritative, with the innermost scope winning. Unresolved language is reported, never silently defaulted.
 - `--sequence-fallback-mode spell|preserve`: preparation fallback policy.
+- `--spacy off|auto|sm|md|lg|trf`: optional local spaCy hints; default `off`.
+  `auto` falls back without hints if no compatible installed model is available;
+  explicit tiers require a local model. No model is downloaded during conversion.
+- `--progress` / `--no-progress`: control stderr progress UI; automatic mode is
+  enabled only when stderr is a TTY.
 - `--max-paragraph-chars N`: projection wrapping limit; default `1000`.
 - `--include-titles` / `--no-include-titles`: include or omit title units.
 - `--refresh`: bypass cached per-chapter preparation, rerun the selected sections,

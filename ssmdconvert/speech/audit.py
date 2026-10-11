@@ -8,6 +8,8 @@ from ..analysis.models import LoadedSsmdSource, SsmdAnalysisReport
 from ..analysis.prepare import analyze_ssmd_source
 from ..analysis.projection import project_txt
 from ..analysis.reporting import build_analysis_report
+from ..linguistics import LinguisticsConfig
+from ..progress import ProgressCallback
 
 
 def audit_ssmd(
@@ -17,6 +19,8 @@ def audit_ssmd(
     language: str | None = None,
     sequence_fallback_mode: str | None = None,
     include_titles: bool = True,
+    linguistics: LinguisticsConfig | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> SsmdAnalysisReport:
     """Run the same ttsready preparation and SSMD mapping used by ``report``."""
     analysis = analyze_ssmd_source(
@@ -25,6 +29,8 @@ def audit_ssmd(
         language=language,
         sequence_fallback_mode=sequence_fallback_mode,
         include_titles=include_titles,
+        linguistics=linguistics,
+        on_progress=on_progress,
     )
     projection = project_txt(analysis, include_titles=include_titles)
     return build_analysis_report(

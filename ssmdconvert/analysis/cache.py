@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ import ttsready
 from ttsready import PreparationResult, PreparationStats, SpeechOverride
 
 from ..errors import AnalysisCacheError, AnalysisError, ContextLookupError
+from ..linguistics import LinguisticResourcePool, LinguisticsConfig
+from ..progress import ProgressCallback, ProgressCallbackFailure, emit_progress
 from .fingerprints import (
     canonical_json_bytes,
     chapter_analysis_key,
@@ -24,7 +27,10 @@ from .fingerprints import (
 )
 from .models import LoadedSsmdSource, SsmdAnalysis, SsmdAnalysisReport, select_sections
 from .prepare import (
+    _enrich_linguistic_units,
+    _preparation_progress,
     _pronunciation_overrides,
+    _resolve_linguistics,
     _stored_sequence_fallback,
     analyze_ssmd_source,
 )
@@ -547,6 +553,7 @@ def _chapter_cache_payload(
     requested_language: str | None,
     fallback_language: str | None,
     sequence_fallback_mode: str,
+    linguistic_identities: Mapping[str, Mapping[str, str]],
 ) -> dict[str, Any]:
     unit_ids = {unit.id for unit in units}
     protected = [
@@ -585,6 +592,9 @@ def _chapter_cache_payload(
         "requested_language": requested_language,
         "fallback_language": fallback_language,
         "sequence_fallback_mode": sequence_fallback_mode,
+        "linguistic_identities": {
+            language: dict(identity) for language, identity in sorted(linguistic_identities.items())
+        },
         "unit_ids": sorted(unit_ids),
     }
 
@@ -705,6 +715,8 @@ def analyze_with_cache(
     pronunciations: dict[str, str] | None = None,
     cache: AnalysisCache | None = None,
     refresh: bool = False,
+    linguistics: LinguisticsConfig | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> CachedAnalysis:
     """Analyze selected SSMD chapters while reusing validated immutable preparations."""
     if max_paragraph_chars is not None and max_paragraph_chars < 1:
@@ -712,6 +724,13 @@ def analyze_with_cache(
     active_cache = cache or AnalysisCache()
     loaded = source if isinstance(source, LoadedSsmdSource) else load_ssmd_source(source)
     selected = select_sections(loaded, chapters)
+    emit_progress(
+        on_progress,
+        "phase.started",
+        "analysis.cache",
+        completed=0,
+        total=len(selected),
+    )
     extracted = extract_units(
         loaded,
         selected,
@@ -719,6 +738,14 @@ def analyze_with_cache(
         fallback_language=fallback_language,
         include_titles=include_titles,
     )
+    selected_linguistics = linguistics or LinguisticsConfig()
+    if not isinstance(selected_linguistics, LinguisticsConfig):
+        raise TypeError("linguistics must be a LinguisticsConfig")
+    pool = LinguisticResourcePool()
+    selections = _resolve_linguistics(extracted.units, selected_linguistics, pool, on_progress)
+    linguistic_identities = {
+        language: selection.cache_identity() for language, selection in selections.items()
+    }
     _stored, effective_fallback, _fallback_issues = _stored_sequence_fallback(
         extracted,
         loaded,
@@ -741,12 +768,25 @@ def analyze_with_cache(
     cache_keys: dict[str, str] = {}
     hits = 0
     misses = 0
-    for section in selected:
+    progress_offset = 0
+    for chapter_index, section in enumerate(selected, start=1):
+        emit_progress(
+            on_progress,
+            "chapter.started",
+            "analysis.cache",
+            completed=chapter_index - 1,
+            total=len(selected),
+            chapter_id=section.id,
+        )
         section_units = tuple(
             unit
             for unit in extracted.units
             if unit_metadata[unit.id].get("section_id") == section.id
         )
+        section_linguistic_identities = {
+            language: linguistic_identities[language]
+            for language in dict.fromkeys(unit.language for unit in section_units)
+        }
         unit_ids = {unit.id for unit in section_units}
         section_overrides = _section_overrides(tuple(all_overrides), unit_ids)
         chapter_hash = section.chapter_sha256 or sha256_bytes(section.ssmd.encode("utf-8"))
@@ -762,6 +802,7 @@ def analyze_with_cache(
             requested_language=language,
             fallback_language=fallback_language,
             sequence_fallback_mode=effective_fallback,
+            linguistic_identities=section_linguistic_identities,
         )
         key = chapter_analysis_key(payload)
         cache_keys[section.id] = key
@@ -779,22 +820,82 @@ def analyze_with_cache(
         )
         if result is None:
             misses += 1
+            emit_progress(
+                on_progress,
+                "cache.miss",
+                "analysis.cache",
+                completed=chapter_index,
+                total=len(selected),
+                chapter_id=section.id,
+                details={"key": key},
+            )
+            prepared_units = _enrich_linguistic_units(
+                section_units,
+                selections,
+                pool,
+                on_progress,
+                completed_offset=progress_offset,
+                progress_total=len(extracted.units),
+            )
+            emit_progress(
+                on_progress,
+                "phase.started",
+                "speech.prepare",
+                completed=progress_offset,
+                total=len(extracted.units),
+                chapter_id=section.id,
+            )
             try:
                 result = ttsready.prepare_units(
-                    section_units,
+                    prepared_units,
                     overrides=section_overrides,
                     profile=active_profile,
                     strict=False,
+                    on_progress=_preparation_progress(
+                        on_progress,
+                        completed_offset=progress_offset,
+                        progress_total=len(extracted.units),
+                    ),
                 )
+            except ProgressCallbackFailure as exc:
+                raise exc.original from exc
             except Exception as exc:
                 raise AnalysisError(
                     f"ttsready could not prepare section {section.id}: {exc}"
                 ) from exc
+            emit_progress(
+                on_progress,
+                "phase.completed",
+                "speech.prepare",
+                completed=progress_offset + len(section_units),
+                total=len(extracted.units),
+                chapter_id=section.id,
+            )
             active_cache.put_chapter(key, section.id, result)
+            cache_status = "miss"
         else:
             hits += 1
+            cache_status = "hit"
+            emit_progress(
+                on_progress,
+                "cache.hit",
+                "analysis.cache",
+                completed=chapter_index,
+                total=len(selected),
+                chapter_id=section.id,
+                details={"key": key},
+            )
         results.append(result)
-
+        emit_progress(
+            on_progress,
+            "chapter.completed",
+            "analysis.cache",
+            completed=chapter_index,
+            total=len(selected),
+            chapter_id=section.id,
+            details={"cache": cache_status},
+        )
+        progress_offset += len(section_units)
     preparation = _combine_preparations(
         tuple(results),
         profile_fingerprint=profile_hash,
@@ -813,6 +914,8 @@ def analyze_with_cache(
         pronunciations=pronunciations,
         unit_extraction=extracted,
         prepared_result=preparation,
+        linguistics=selected_linguistics,
+        on_progress=on_progress,
     )
     projection = project_txt(
         analysis,
@@ -833,6 +936,7 @@ def analyze_with_cache(
         "effective_sequence_fallback": effective_fallback,
         "include_titles": include_titles,
         "max_paragraph_chars": max_paragraph_chars,
+        "linguistics": linguistic_identities,
     }
     analysis_id = ssmd_analysis_id(
         source_content_fingerprint=loaded.content_fingerprint,
@@ -858,6 +962,14 @@ def analyze_with_cache(
         chapter_keys=cache_keys,
     )
     active_cache.save_snapshot(loaded.path, snapshot)
+    emit_progress(
+        on_progress,
+        "phase.completed",
+        "analysis.cache",
+        completed=len(selected),
+        total=len(selected),
+        details={"hits": hits, "misses": misses},
+    )
     return CachedAnalysis(
         analysis=analysis,
         projection=projection,

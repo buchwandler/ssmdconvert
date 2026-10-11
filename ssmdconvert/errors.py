@@ -34,6 +34,10 @@ class AnalysisError(SSMDConvertError):
     """An SSMD-specific analysis operation failed."""
 
 
+class LinguisticsError(AnalysisError):
+    """A local spaCy policy, model, or analysis operation failed."""
+
+
 class AnalysisSourceError(AnalysisError):
     """An SSMD analysis source could not be loaded or validated."""
 

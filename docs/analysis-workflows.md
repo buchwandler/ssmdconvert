@@ -2,7 +2,7 @@
 
 `ssmdconvert` owns SSMD-specific source loading, chapter selection, language/context
 semantics, source mapping, reporting, TXT projection, and write-back. It uses the
-public `ttsready>=0.2,<0.3` Python API for source-neutral speech preparation and QA;
+public `ttsready>=0.2.2,<0.3` Python API for source-neutral speech preparation and QA;
 `ttsready` is a core dependency. Generic analysis IDs and change provenance are
 reported without exposing replacement identities as application-specific rules.
 
@@ -36,11 +36,33 @@ non-zero if a warning or error was reported. Each report run saves a source-leve
 snapshot and may reuse compatible per-chapter preparation results. `--refresh`
 bypasses the chapter cache and reruns preparation for the selected sections.
 
-`--language` supplies an explicit language override. Without one, language is
-resolved from SSMD and book metadata. Unresolved language is reported; the tool
-does not silently assume English. `--sequence-fallback-mode`,
+`--language` sets the document base language for unscoped text. Inline SSMD language spans remain authoritative, with the innermost scope winning. Without a CLI override, language is resolved from SSMD section and book metadata. Unresolved language is reported; the tool does not silently assume English. `--sequence-fallback-mode`,
 `--max-paragraph-chars`, and `--include-titles/--no-include-titles` control the
 same preparation/projection options used by `txt`.
+
+## Local spaCy enrichment
+
+Speech-preparation commands (`book convert`, `report`, `txt`, and `speech audit`,
+`annotate`, or `freeze`) accept `--spacy off|auto|sm|md|lg|trf`. The default is
+`off`. `auto` checks local models for each effective language in the preference
+order `sm`, `md`, `lg`, `trf`, then warns and continues without hints if none is
+available. Explicit tiers require their matching local model. Install
+`ssmdconvert[spacy]` and install models separately; for example,
+`python -m spacy download en_core_web_sm`. SSMDConvert never downloads spaCy or
+models during conversion.
+
+The analysis cache fingerprints the selected policy, provider/model identity,
+and spaCy/model versions. Changes invalidate incompatible chapter preparation;
+a compatible cache hit skips inference over the text.
+
+## Progress and output channels
+
+Long-running preparation commands accept `--progress` / `--no-progress`. By
+default, progress is enabled only when stderr is a terminal. A capable terminal
+uses Rich; explicitly requested progress otherwise uses concise plain stderr
+messages. Reports, TXT projections, and JSON stay on stdout. Python callbacks
+are synchronous and provider-neutral; callers own rendering, and callback
+exceptions propagate.
 
 ## Context lookup
 

@@ -6,8 +6,9 @@ from epub_support import make_epub
 from ssmd import lint, parse_structure
 
 from ssmdconvert import Book, BookChapter, convert_book
-from ssmdconvert.analysis import analyze_ssmd_source
+from ssmdconvert.analysis import analyze_ssmd_source, load_ssmd_source
 from ssmdconvert.analysis.models import LoadedSsmdSection, LoadedSsmdSource
+from ssmdconvert.analysis.units import extract_units
 from ssmdconvert.errors import MaterializationError
 from ssmdconvert.metadata import PORTABLE_SSMD_METADATA_KEYS
 from ssmdconvert.render import validate_ssmd_document
@@ -126,6 +127,35 @@ def test_convert_book_language_override_and_absent_source_language(tmp_path: Pat
         parse_structure(chapter.ssmd, dialect="0.9").header["language"] == "fr-FR"
         for chapter in supplied.chapters
     )
+
+
+def test_book_language_override_changes_base_but_not_inline_language(tmp_path: Path, monkeypatch):
+    source = tmp_path / "book.epub"
+    make_epub(source)
+
+    def render_with_inline_language(_title, _markdown, metadata):
+        return (
+            '---\nssmd_version: "0.9"\ntitle: "Sample title"\n'
+            f"language: {metadata['language']}\n---\n"
+            'English [bonjour]{lang="fr-FR"} end.\n'
+        )
+
+    monkeypatch.setattr("ssmdconvert.books.render_standalone_chapter", render_with_inline_language)
+    book = convert_book(source, language="de-DE", speech_semantics="preserve")
+
+    chapter = book.chapters[0]
+    structure = parse_structure(chapter.ssmd, dialect="0.9")
+    assert structure.header["language"] == "de-DE"
+
+    chapter_path = tmp_path / "chapter.ssmd"
+    chapter_path.write_text(chapter.ssmd, encoding="utf-8")
+    extracted = extract_units(load_ssmd_source(chapter_path), language="de-DE")
+    assert [unit.language for unit in extracted.units if unit.role == "title"] == ["de-DE"]
+    assert [unit.language for unit in extracted.units if unit.role == "prose"] == [
+        "de-DE",
+        "fr-FR",
+        "de-DE",
+    ]
 
 
 def test_convert_book_mirrors_all_portable_metadata_into_valid_chapters(tmp_path: Path) -> None:
@@ -288,3 +318,35 @@ def test_materialize_book_speech_returns_immutable_analysis_backed_book(
     assert '[3–2–1]{sub="three - two - one"}' in result.book.chapters[0].ssmd
     assert result.analysis.source.workspace_type == "generated"
     assert result.analysis.sections[0].id == book.chapters[0].id
+
+
+def test_book_progress_counts_selected_chapters_and_propagates_callback_errors(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.epub"
+    make_epub(source)
+    events = []
+
+    book = convert_book(source, speech_semantics="preserve", on_progress=events.append)
+
+    assert len(book.chapters) == 2
+    rendered = [
+        event
+        for event in events
+        if event.phase == "book.chapter.render" and event.kind == "chapter.completed"
+    ]
+    assert [event.completed for event in rendered] == [1, 2]
+    assert [event.chapter_id for event in rendered] == ["chapter-0001", "chapter-0002"]
+    assert any(
+        event.kind == "phase.started" and event.phase == "book.epub.load" for event in events
+    )
+    assert any(
+        event.kind == "phase.completed" and event.phase == "book.chapter.render" for event in events
+    )
+
+    def cancel(event):
+        if event.kind == "chapter.started":
+            raise ValueError("stop book conversion")
+
+    with pytest.raises(ValueError, match="stop book conversion"):
+        convert_book(source, speech_semantics="preserve", on_progress=cancel)

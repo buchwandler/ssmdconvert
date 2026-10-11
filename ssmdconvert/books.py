@@ -8,6 +8,7 @@ from typing import Any
 from ._epub import ExtractedChapter, load_epub
 from .chapter_selection import parse_chapter_selection
 from .errors import BookError
+from .linguistics import LinguisticsConfig
 from .metadata import merge_document_metadata
 from .models import Book, BookChapter, BookInspection, BookInspectionChapter, SourceInfo
 from .policy import (
@@ -15,6 +16,7 @@ from .policy import (
     SequenceFallbackMode,
     SpeechSemanticsMode,
 )
+from .progress import ProgressCallback, emit_progress
 from .render import render_standalone_chapter
 
 
@@ -77,11 +79,22 @@ def convert_book(
     metadata_overrides: Mapping[str, Any] | None = None,
     sequence_fallback_mode: SequenceFallbackMode = DEFAULT_SEQUENCE_FALLBACK_MODE,
     speech_semantics: SpeechSemanticsMode = "freeze",
+    linguistics: LinguisticsConfig | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> Book:
     """Convert selected EPUB chapters to standalone SSMD in source order."""
     if speech_semantics not in ("freeze", "preserve"):
         raise ValueError("speech_semantics must be 'freeze' or 'preserve'")
+    emit_progress(on_progress, "phase.started", "book.epub.load")
     inspection, extracted_chapters = _inspect_epub(source)
+    emit_progress(
+        on_progress,
+        "phase.completed",
+        "book.epub.load",
+        completed=len(inspection.chapters),
+        total=len(inspection.chapters),
+        details={"chapter_count": len(inspection.chapters)},
+    )
     metadata = merge_document_metadata(
         inspection.metadata,
         metadata_overrides=metadata_overrides,
@@ -91,16 +104,41 @@ def convert_book(
     source_path = inspection.source.path
     assert source_path is not None
     source_sha256 = _source_sha256(source_path)
+    emit_progress(on_progress, "phase.started", "book.chapter.select")
     selected_numbers = parse_chapter_selection(
         chapters,
         available_numbers=tuple(chapter.source_number for chapter in inspection.chapters),
     )
     selected = set(selected_numbers)
+    emit_progress(
+        on_progress,
+        "phase.completed",
+        "book.chapter.select",
+        completed=len(selected_numbers),
+        total=len(selected_numbers),
+    )
     book_chapters: list[BookChapter] = []
 
+    emit_progress(
+        on_progress,
+        "phase.started",
+        "book.chapter.render",
+        completed=0,
+        total=len(selected_numbers),
+    )
     for chapter in extracted_chapters:
         if chapter.source_number not in selected:
             continue
+        emit_progress(
+            on_progress,
+            "chapter.started",
+            "book.chapter.render",
+            completed=len(book_chapters),
+            total=len(selected_numbers),
+            chapter_id=chapter.id,
+            source_number=chapter.source_number,
+            title=chapter.title,
+        )
         try:
             ssmd = render_standalone_chapter(chapter.title, chapter.markdown, metadata)
         except ValueError as exc:
@@ -122,6 +160,23 @@ def convert_book(
                 diagnostics=chapter.diagnostics,
             )
         )
+        emit_progress(
+            on_progress,
+            "chapter.completed",
+            "book.chapter.render",
+            completed=len(book_chapters),
+            total=len(selected_numbers),
+            chapter_id=chapter.id,
+            source_number=chapter.source_number,
+            title=chapter.title,
+        )
+    emit_progress(
+        on_progress,
+        "phase.completed",
+        "book.chapter.render",
+        completed=len(book_chapters),
+        total=len(selected_numbers),
+    )
 
     book = Book(
         source=inspection.source,
@@ -139,4 +194,6 @@ def convert_book(
         source_path=source_path,
         language=language,
         sequence_fallback_mode=sequence_fallback_mode,
+        linguistics=linguistics,
+        on_progress=on_progress,
     ).book

@@ -25,6 +25,11 @@ snapshot. Compatible per-chapter preparation results are reused by default.
 reruns preparation for the selected sections before saving a fresh snapshot.
 Re-running identical inputs may produce the same deterministic analysis ID.
 
+Chapter preparation fingerprints include the linguistics policy, selected
+provider/model, and their versions. Changing those values invalidates cached
+preparation, while a compatible hit reuses results without running NLP over the
+chapter.
+
 `ssmdconvert context SOURCE CHANGE_ID` resolves a generic change ID from that
 source's saved analyses and verifies only the current bytes of the affected
 chapter. If those bytes differ from the cached chapter fingerprint, context fails

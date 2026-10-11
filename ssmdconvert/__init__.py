@@ -16,11 +16,13 @@ from .errors import (
     BookBundleValidationError,
     BookError,
     ChapterSelectionError,
+    LinguisticsError,
     MissingDependencyError,
     SSMDConvertError,
     UnsupportedBookSourceError,
     UnsupportedInputError,
 )
+from .linguistics import LinguisticsConfig, SpacyPolicy
 from .models import (
     Book,
     BookChapter,
@@ -33,6 +35,7 @@ from .models import (
     SourceInfo,
     WorkspaceChapterStatus,
 )
+from .progress import ProgressCallback, ProgressEvent
 
 try:
     from ._version import version as __version__
@@ -58,7 +61,12 @@ __all__ = [
     "Converter",
     "Document",
     "MissingDependencyError",
+    "LinguisticsConfig",
+    "LinguisticsError",
     "SSMDConvertError",
+    "ProgressCallback",
+    "ProgressEvent",
+    "SpacyPolicy",
     "Section",
     "SourceInfo",
     "UnsupportedBookSourceError",

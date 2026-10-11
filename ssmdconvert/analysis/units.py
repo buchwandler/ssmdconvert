@@ -82,13 +82,11 @@ def _language_for_interval(
     end: int,
     annotations: tuple[AnnotationSpan, ...],
     *,
-    requested_language: str | None,
+    base_language_override: str | None,
     section_language: str | None,
     source_language: str | None,
     fallback_language: str | None,
 ) -> str | None:
-    if requested_language is not None:
-        return requested_language
     scoped = [
         annotation
         for annotation in annotations
@@ -99,6 +97,8 @@ def _language_for_interval(
     if scoped:
         innermost = min(scoped, key=lambda item: item.char_end - item.char_start)
         return _annotation_language(innermost)
+    if base_language_override is not None:
+        return base_language_override
     return section_language or source_language or fallback_language
 
 
@@ -107,7 +107,7 @@ def _runs_for_paragraph(
     end: int,
     annotations: tuple[AnnotationSpan, ...],
     *,
-    requested_language: str | None,
+    base_language_override: str | None,
     section_language: str | None,
     source_language: str | None,
     fallback_language: str | None,
@@ -126,7 +126,7 @@ def _runs_for_paragraph(
             run_start,
             run_end,
             annotations,
-            requested_language=requested_language,
+            base_language_override=base_language_override,
             section_language=section_language,
             source_language=source_language,
             fallback_language=fallback_language,
@@ -244,7 +244,7 @@ def extract_units(
     Unit text is an exact slice of parser clean text. No SSMD markup or Path
     values enter ttsready metadata.
     """
-    requested_language = _validate_language(language, "language")
+    base_language_override = _validate_language(language, "language")
     fallback_language = _validate_language(fallback_language, "fallback_language")
     selected = tuple(source.sections if sections is None else sections)
     source_language = _metadata_language(source.metadata)
@@ -292,7 +292,7 @@ def extract_units(
                     (
                         0,
                         len(context_text),
-                        requested_language
+                        base_language_override
                         or section_language
                         or source_language
                         or fallback_language,
@@ -304,7 +304,7 @@ def extract_units(
                     context_start,
                     context_end,
                     annotations,
-                    requested_language=requested_language,
+                    base_language_override=base_language_override,
                     section_language=section_language,
                     source_language=source_language,
                     fallback_language=fallback_language,

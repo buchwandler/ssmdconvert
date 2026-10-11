@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, replace
@@ -33,8 +34,10 @@ from .bundle import (
 from .cli_help import AdaptiveTyper, AdaptiveTyperGroup
 from .converter import Converter
 from .errors import SSMDConvertError
+from .linguistics import LinguisticsConfig, SpacyPolicy
 from .metadata import load_metadata_file
 from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SpeechSemanticsMode
+from .progress import ProgressCallback, ProgressEvent
 from .speech.audit import audit_ssmd
 from .speech.workflows import materialize_analysis
 
@@ -95,6 +98,191 @@ def _run_with_domain_errors(operation: Callable[[], None]) -> None:
     except (SSMDConvertError, OSError, ValueError) as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+
+
+class _CliProgress:
+    """Render API progress on stderr, using Rich only for a capable TTY."""
+
+    def __init__(self, requested: bool | None) -> None:
+        is_tty = bool(getattr(sys.stderr, "isatty", lambda: False)())
+        self.enabled = is_tty if requested is None else requested
+        self.use_rich = (
+            self.enabled
+            and is_tty
+            and "NO_COLOR" not in os.environ
+            and os.environ.get("TERM", "").lower() != "dumb"
+        )
+        self._progress: Any | None = None
+        self._console: Any | None = None
+        self._tasks: dict[str, Any] = {}
+
+    def __enter__(self) -> _CliProgress:
+        if self.use_rich:
+            try:
+                from rich.console import Console
+                from rich.progress import (
+                    BarColumn,
+                    Progress,
+                    SpinnerColumn,
+                    TaskProgressColumn,
+                    TextColumn,
+                    TimeElapsedColumn,
+                )
+            except ImportError:
+                self.use_rich = False
+            else:
+                self._console = Console(stderr=True, force_terminal=True)
+                self._progress = Progress(
+                    SpinnerColumn(),
+                    TextColumn("{task.description}"),
+                    BarColumn(),
+                    TaskProgressColumn(),
+                    TimeElapsedColumn(),
+                    console=self._console,
+                    transient=True,
+                )
+                self._progress.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        if self._progress is not None:
+            self._progress.stop()
+
+    @staticmethod
+    def _label(phase: str) -> str:
+        return phase.replace(".", " ").replace("_", " ").capitalize()
+
+    def _print(self, message: str, *, style: str | None = None) -> None:
+        if self._console is not None and self.use_rich:
+            self._console.print(message, style=style, markup=False)
+        else:
+            typer.echo(message, err=True)
+
+    def _fallback_warnings(self, event: ProgressEvent) -> None:
+        if event.phase != "linguistics.resolve" or event.kind != "phase.completed":
+            return
+        fallbacks = event.details.get("fallbacks", {})
+        if not isinstance(fallbacks, Mapping):
+            return
+        for language, reason in fallbacks.items():
+            self._print(
+                f"Warning: spaCy auto fallback for {language}: {reason}. "
+                "Continuing without linguistic hints.",
+                style="yellow",
+            )
+
+    def __call__(self, event: ProgressEvent) -> None:
+        self._fallback_warnings(event)
+        if not self.enabled:
+            return
+        if self._progress is None:
+            self._plain_event(event)
+            return
+        if event.kind == "phase.started":
+            task_id = self._tasks.get(event.phase)
+            label = self._label(event.phase)
+            if task_id is None:
+                self._tasks[event.phase] = self._progress.add_task(
+                    label,
+                    total=event.total,
+                    completed=event.completed or 0,
+                )
+            else:
+                self._progress.update(
+                    task_id,
+                    description=label,
+                    total=event.total,
+                    completed=event.completed or 0,
+                    visible=True,
+                )
+        elif event.kind == "phase.completed":
+            task_id = self._tasks.pop(event.phase, None)
+            if task_id is not None:
+                updates: dict[str, Any] = {"visible": False}
+                if event.total is not None:
+                    updates["total"] = event.total
+                if event.completed is not None:
+                    updates["completed"] = event.completed
+                self._progress.update(task_id, **updates)
+        elif event.kind in {
+            "chapter.started",
+            "chapter.completed",
+            "unit.started",
+            "unit.completed",
+        }:
+            task_id = self._tasks.get(event.phase)
+            if task_id is not None:
+                updates = {}
+                if event.total is not None:
+                    updates["total"] = event.total
+                if (
+                    event.kind in {"chapter.completed", "unit.completed"}
+                    and event.completed is not None
+                ):
+                    updates["completed"] = event.completed
+                if event.chapter_id is not None:
+                    updates["description"] = f"{self._label(event.phase)}: {event.chapter_id}"
+                self._progress.update(task_id, **updates)
+        elif event.kind in {"cache.hit", "cache.miss"}:
+            task_id = self._tasks.get(event.phase)
+            if task_id is not None:
+                self._progress.update(
+                    task_id,
+                    description=(
+                        f"{self._label(event.phase)}: {event.kind[6:]} {event.chapter_id or ''}"
+                    ),
+                )
+        elif event.kind in {"model.started", "model.completed"}:
+            action = "Loading" if event.kind == "model.started" else "Loaded"
+            if self._console is not None:
+                self._console.print(
+                    f"{action} local spaCy model {event.model} ({event.language})",
+                    markup=False,
+                )
+            else:
+                self._print(f"{action} local spaCy model {event.model} ({event.language})")
+
+    def _plain_event(self, event: ProgressEvent) -> None:
+        if event.kind == "phase.started":
+            self._print(f"Starting {self._label(event.phase)}")
+        elif event.kind == "phase.completed":
+            count = ""
+            if event.completed is not None and event.total is not None:
+                count = f" ({event.completed}/{event.total})"
+            self._print(f"Completed {self._label(event.phase)}{count}")
+        elif event.kind == "chapter.completed":
+            self._print(
+                f"{self._label(event.phase)}: {event.completed}/{event.total} "
+                f"{event.chapter_id or ''} complete"
+            )
+        elif event.kind == "unit.completed" and (
+            event.completed == event.total or (event.completed or 0) % 10 == 0
+        ):
+            self._print(f"{self._label(event.phase)}: {event.completed}/{event.total} units")
+        elif event.kind in {"model.started", "model.completed"}:
+            action = "Loading" if event.kind == "model.started" else "Loaded"
+            self._print(f"{action} local spaCy model {event.model} ({event.language})")
+        elif event.kind in {"cache.hit", "cache.miss"}:
+            self._print(f"Cache {event.kind[6:]}: {event.chapter_id}")
+
+    def success(self, message: str) -> None:
+        if self.enabled:
+            self._print(f"Completed: {message}", style="green")
+
+
+def _run_with_cli_progress(
+    requested: bool | None,
+    operation: Callable[[ProgressCallback], None],
+    success_message: str,
+) -> None:
+    reporter = _CliProgress(requested)
+    with reporter:
+        _run_with_domain_errors(lambda: operation(reporter))
+    reporter.success(success_message)
+
+
+def _linguistics_config(policy: SpacyPolicy) -> LinguisticsConfig:
+    return LinguisticsConfig(policy)
 
 
 def _output_path(path: Path) -> Path:
@@ -191,12 +379,16 @@ def _speech_materialize_to_destination(
     sequence_fallback_mode: SequenceFallbackModeOption,
     force: bool,
     bundle_format: str | None,
+    linguistics: LinguisticsConfig,
+    on_progress: ProgressCallback,
 ) -> Path:
     analysis = analyze_ssmd_source(
         source,
         chapters=chapters,
         language=language,
         sequence_fallback_mode=sequence_fallback_mode.value,
+        linguistics=linguistics,
+        on_progress=on_progress,
     )
     materialized = materialize_analysis(analysis)
     destination = _output_path(output)
@@ -375,6 +567,8 @@ def _analyze_projection(
     sequence_fallback_mode: SequenceFallbackModeOption,
     max_paragraph_chars: int,
     include_titles: bool,
+    linguistics: LinguisticsConfig,
+    on_progress: ProgressCallback,
 ):
     if max_paragraph_chars < 1:
         raise ValueError("--max-paragraph-chars must be at least 1")
@@ -384,6 +578,8 @@ def _analyze_projection(
         language=language,
         sequence_fallback_mode=sequence_fallback_mode.value,
         include_titles=include_titles,
+        linguistics=linguistics,
+        on_progress=on_progress,
     )
     projection = project_txt(
         analysis,
@@ -429,10 +625,18 @@ def report(
     show_raw_spans: Annotated[bool, typer.Option("--show-raw-spans")] = False,
     fail_on_warning: Annotated[bool, typer.Option("--fail-on-warning")] = False,
     refresh: Annotated[bool, typer.Option("--refresh")] = False,
+    spacy: Annotated[
+        SpacyPolicy,
+        typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
+    ] = "off",
+    progress: Annotated[
+        bool | None,
+        typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
+    ] = None,
 ) -> None:
     """Report SSMD-aware preparation, source context, and TXT projection statistics."""
 
-    def run() -> None:
+    def run(on_progress: ProgressCallback) -> None:
         cached = analyze_with_cache(
             source,
             chapters=chapters,
@@ -441,6 +645,8 @@ def report(
             include_titles=include_titles,
             max_paragraph_chars=max_paragraph_chars,
             refresh=refresh,
+            linguistics=_linguistics_config(spacy),
+            on_progress=on_progress,
         )
         analysis_report = cached.report
         selected_format = _report_format(output, output_format)
@@ -459,7 +665,7 @@ def report(
         ):
             raise typer.Exit(code=1)
 
-    _run_with_domain_errors(run)
+    _run_with_cli_progress(progress, run, "SSMD report complete")
 
 
 @app.command("context")  # type: ignore[untyped-decorator]
@@ -503,10 +709,18 @@ def txt(
     ] = True,
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     force: Annotated[bool, typer.Option("--force")] = False,
+    spacy: Annotated[
+        SpacyPolicy,
+        typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
+    ] = "off",
+    progress: Annotated[
+        bool | None,
+        typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
+    ] = None,
 ) -> None:
     """Project SSMD into generic prepared plain text for downstream TTS."""
 
-    def run() -> None:
+    def run(on_progress: ProgressCallback) -> None:
         _analysis, projection = _analyze_projection(
             source,
             chapters=chapters,
@@ -514,6 +728,8 @@ def txt(
             sequence_fallback_mode=sequence_fallback_mode,
             max_paragraph_chars=max_paragraph_chars,
             include_titles=include_titles,
+            linguistics=_linguistics_config(spacy),
+            on_progress=on_progress,
         )
         if output is None:
             typer.echo(projection.text, nl=False)
@@ -521,7 +737,7 @@ def txt(
             _write_text_atomically(projection.text, output, source=source, force=force)
             typer.echo(f"Wrote prepared text: {_output_path(output)}", err=True)
 
-    _run_with_domain_errors(run)
+    _run_with_cli_progress(progress, run, "prepared text complete")
 
 
 @speech_app.command("audit")  # type: ignore[untyped-decorator]
@@ -539,16 +755,26 @@ def speech_audit(
     ] = True,
     json_output: Annotated[bool, typer.Option("--json")] = False,
     fail_on_warning: Annotated[bool, typer.Option("--fail-on-warning")] = False,
+    spacy: Annotated[
+        SpacyPolicy,
+        typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
+    ] = "off",
+    progress: Annotated[
+        bool | None,
+        typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
+    ] = None,
 ) -> None:
     """Audit automatic speech changes using the shared SSMD analysis pipeline."""
 
-    def run() -> None:
+    def run(on_progress: ProgressCallback) -> None:
         report = audit_ssmd(
             source,
             chapters=chapters,
             language=language,
             sequence_fallback_mode=sequence_fallback_mode.value,
             include_titles=include_titles,
+            linguistics=_linguistics_config(spacy),
+            on_progress=on_progress,
         )
         payload = _speech_audit_payload(report)
         if json_output:
@@ -560,7 +786,7 @@ def speech_audit(
         ):
             raise typer.Exit(code=1)
 
-    _run_with_domain_errors(run)
+    _run_with_cli_progress(progress, run, "speech audit complete")
 
 
 def _run_speech_materialization_command(
@@ -573,8 +799,10 @@ def _run_speech_materialization_command(
     sequence_fallback_mode: SequenceFallbackModeOption,
     force: bool,
     bundle_format: str | None,
+    linguistics: LinguisticsConfig,
+    progress: bool | None,
 ) -> None:
-    def run() -> None:
+    def run(on_progress: ProgressCallback) -> None:
         destination = _speech_materialize_to_destination(
             source,
             output,
@@ -583,10 +811,12 @@ def _run_speech_materialization_command(
             sequence_fallback_mode=sequence_fallback_mode,
             force=force,
             bundle_format=bundle_format,
+            linguistics=linguistics,
+            on_progress=on_progress,
         )
         typer.echo(f"Wrote {command} SSMD: {destination}")
 
-    _run_with_domain_errors(run)
+    _run_with_cli_progress(progress, run, f"{command} SSMD materialized")
 
 
 @speech_app.command("annotate")  # type: ignore[untyped-decorator]
@@ -604,6 +834,14 @@ def speech_annotate(
         typer.Option("--format"),
     ] = None,
     force: Annotated[bool, typer.Option("--force")] = False,
+    spacy: Annotated[
+        SpacyPolicy,
+        typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
+    ] = "off",
+    progress: Annotated[
+        bool | None,
+        typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
+    ] = None,
 ) -> None:
     """Write selected automatic speech decisions as SSMD substitutions."""
     _run_speech_materialization_command(
@@ -615,6 +853,8 @@ def speech_annotate(
         sequence_fallback_mode=sequence_fallback_mode,
         force=force,
         bundle_format=bundle_format,
+        linguistics=_linguistics_config(spacy),
+        progress=progress,
     )
 
 
@@ -633,6 +873,14 @@ def speech_freeze(
         typer.Option("--format"),
     ] = None,
     force: Annotated[bool, typer.Option("--force")] = False,
+    spacy: Annotated[
+        SpacyPolicy,
+        typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
+    ] = "off",
+    progress: Annotated[
+        bool | None,
+        typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
+    ] = None,
 ) -> None:
     """Freeze selected automatic speech decisions into explicit SSMD semantics."""
     _run_speech_materialization_command(
@@ -644,6 +892,8 @@ def speech_freeze(
         sequence_fallback_mode=sequence_fallback_mode,
         force=force,
         bundle_format=bundle_format,
+        linguistics=_linguistics_config(spacy),
+        progress=progress,
     )
 
 
@@ -814,10 +1064,18 @@ def book_convert(
     ] = "freeze",
     bundle_format: Annotated[str | None, typer.Option("--format")] = None,
     force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
+    spacy: Annotated[
+        SpacyPolicy,
+        typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
+    ] = "off",
+    progress: Annotated[
+        bool | None,
+        typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
+    ] = None,
 ) -> None:
     """Convert an EPUB into an SSMD book bundle."""
 
-    def run() -> None:
+    def run(on_progress: ProgressCallback) -> None:
         book = convert_book(
             source,
             chapters=chapters,
@@ -827,6 +1085,8 @@ def book_convert(
             ),
             sequence_fallback_mode=sequence_fallback_mode.value,
             speech_semantics=speech_semantics,
+            linguistics=_linguistics_config(spacy),
+            on_progress=on_progress,
         )
         destination = output or source.with_suffix(".ssmdbook")
         _reject_input_overwrite(source, _output_path(destination))
@@ -840,7 +1100,7 @@ def book_convert(
         typer.echo(f"Created SSMD book bundle: {written}")
         typer.echo(f"Chapters: {len(book.chapters)}")
 
-    _run_with_domain_errors(run)
+    _run_with_cli_progress(progress, run, "book conversion complete")
 
 
 @book_app.command("pack")  # type: ignore[untyped-decorator]

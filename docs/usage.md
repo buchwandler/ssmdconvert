@@ -64,14 +64,14 @@ The book CLI uses explicit subcommands:
 
 ```bash
 ssmdconvert book inspect novel.epub [--json]
-ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve] [--speech-semantics freeze|preserve]
+ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve] [--speech-semantics freeze|preserve] [--spacy off|auto|sm|md|lg|trf] [--progress|--no-progress]
 ssmdconvert book validate BUNDLE [--json]
 ssmdconvert book metadata BUNDLE [--json]
 ```
 
 Selectors use original 1-based source chapter numbers. They accept a single number, a range, a comma-separated list, or a mixture such as `1,3-5`. Selected chapters remain in original source order.
 
-Book conversion defaults to `--speech-semantics freeze`, using upstream speech decisions to add exact SSMD `sub` annotations without changing visible text. Freeze requires a resolvable language; provide `-l/--language` or select `--speech-semantics preserve` for structural-only output. Existing author-owned speech annotations remain authoritative.
+Book conversion defaults to `--speech-semantics freeze`, using upstream speech decisions to add exact SSMD `sub` annotations without changing visible text. Freeze requires a resolvable language; provide `-l/--language` for unscoped/base text or select `--speech-semantics preserve` for structural-only output. Inline SSMD language spans remain authoritative, with the innermost nested scope taking precedence over the CLI/base language; existing author-owned speech annotations remain authoritative.
 
 Book output format is inferred only from `.ssmdbook` (directory) and `.ssmdbook.zip` (ZIP). For other names, specify `--format directory` or `--format zip`. Existing bundles are refused unless `--force` is supplied. A forced directory output replaces the complete previous directory; stale files are not merged into the new bundle.
 
@@ -90,6 +90,11 @@ ssmdconvert speech annotate SOURCE -o OUTPUT
 ssmdconvert speech freeze SOURCE -o OUTPUT
 ```
 
+Report, TXT, speech audit/annotate/freeze, and book conversion accept
+`--spacy off|auto|sm|md|lg|trf`; `off` is the default. They also accept
+`--progress/--no-progress`, with automatic progress only when stderr is a TTY.
+Rich UI or plain status output goes to stderr, leaving report, TXT, and JSON
+stdout clean.
 The commands accept standalone SSMD, validated ZIP bundles, and directory workspaces. Reports and TXT share a projection; `context` resolves a generic change ID from a report cache. `speech audit` is read-only. Annotation and freeze write to a new destination by default, preserve visible text, and refuse to modify a source workspace in place. Existing output requires `--force`; the input cannot be overwritten. See [SSMD analysis and speech workflows](analysis-workflows.md) for language handling, cache freshness, workspace policy, and migration from the removed `ttsready` CLI.
 
 ## Help

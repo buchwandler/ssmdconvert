@@ -77,7 +77,7 @@ result = convert(
 
 `BookChapter.id` is the canonical chapter identity. `source_id` and `source_parent_id` preserve source navigation identifiers; `parent_id` refers to the canonical parent chapter ID when present in the inventory. `Book.source_sha256` is captured during conversion.
 
-`convert_book()` defaults to `sequence_fallback_mode=preserve`, accepts an optional `language` override and `metadata_overrides` mapping, and records effective metadata in `Book.metadata` and portable keys in each generated chapter. Source language is retained by default; absent source language stays absent unless supplied. For example:
+`convert_book()` defaults to `sequence_fallback_mode=preserve`, accepts an optional `language` override and `metadata_overrides` mapping, and records effective metadata in `Book.metadata` and portable keys in each generated chapter. Source language is retained by default; absent source language stays absent unless supplied. The override applies to unscoped runs, while inline SSMD language scopes remain authoritative. For example:
 
 ```python
 book = convert_book(
@@ -142,12 +142,16 @@ The writer requires `format="directory"` or `format="zip"`. Existing destination
 SSMD report, context lookup, TXT projection, speech audit, annotation, and freeze are
 user-facing CLI workflows. The former optional `SpeechPreparationOptions` /
 `prepare_ssmd_for_speech` engine and its direct `spokenform` runtime dependency have
-been removed; `ttsready>=0.2,<0.3` supplies generic preparation through its public
+been removed; `ttsready>=0.2.2,<0.3` supplies generic preparation through its public
 Python API.
 
 See [SSMD analysis and speech workflows](analysis-workflows.md) for command usage,
 cache ownership, source mapping, safe write-back, and migration from the removed
 `ttsready` CLI.
+
+At the CLI and Python API boundaries, SSMDConvert owns local spaCy policy/model
+selection and progress presentation; TTSReady stays source-neutral and API-only.
+No TTSReady CLI or UtterPlan dependency is introduced.
 
 ## Version
 

@@ -29,14 +29,26 @@ python -m pip install ssmdconvert
 ```
 
 The base install supports text, Markdown, HTML, EPUB, SSMD analysis, and speech
-audit/annotation. `ttsready>=0.2,<0.3` is installed as a core dependency; only PDF
-and DOCX adapters are optional:
+audit/annotation. `ttsready>=0.2.2,<0.3` is a core dependency; PDF,
+DOCX, and spaCy are optional extras:
 
 ```bash
 python -m pip install "ssmdconvert[pdf]"
 python -m pip install "ssmdconvert[docx]"
+python -m pip install "ssmdconvert[spacy]" # optional local spaCy enrichment
 python -m pip install "ssmdconvert[all]"
 ```
+
+The `spacy` extra installs spaCy but no language model. Install a model explicitly, for example:
+
+```bash
+python -m spacy download en_core_web_sm
+```
+
+SSMDConvert never downloads spaCy or models during conversion. The default is
+`--spacy off`; `auto` uses compatible local models, preferring `sm`, then `md`,
+`lg`, and `trf`, and warns/falls back to no hints if none is available. Explicit
+tiers require the corresponding local model.
 
 Python 3.10 or newer is required. Conversion, analysis, and EPUB extraction run
 locally. EPUB book conversion freezes safe automatic speech decisions by default;
@@ -82,7 +94,7 @@ ssmdconvert book metadata novel.ssmdbook.zip --json
 
 Chapter selectors use original 1-based source numbers. Selected chapters remain in source order. Use `--format directory` or `--format zip` when the output name does not end in `.ssmdbook` or `.ssmdbook.zip`. Bundle destinations are not overwritten unless `--force` is given; forced directory writes replace the complete prior directory rather than merging files.
 
-Book conversion defaults to `--speech-semantics freeze`, which materializes safe automatic speech decisions from `ttsready`/`spokenform` as explicit SSMD `sub` annotations without changing visible text. Freeze requires an effective language; supply `--language` or select `--speech-semantics preserve` for structural-only conversion. Existing author-owned speech annotations remain authoritative.
+Book conversion defaults to `--speech-semantics freeze`, which materializes safe automatic speech decisions from `ttsready`/`spokenform` as explicit SSMD `sub` annotations without changing visible text. Freeze requires an effective language; use `--language` to set the base for unscoped text or select `--speech-semantics preserve` for structural-only conversion. Inline SSMD language spans and existing author-owned speech annotations remain authoritative.
 
 Editing a referenced chapter makes the directory workspace dirty, but workspace loading returns the actual valid SSMD instead of failing on a stale hash. `book metadata` reports clean/dirty status and dirty chapter count. Use `book refresh` to update manifest digests and character counts explicitly; `book refresh --check` does not mutate and exits non-zero when dirty or invalid. `book pack` creates a strict ZIP from current valid workspace contents without changing the source manifest. The reserved `.readio/` directory is downstream local state: it is ignored by validation and never included in ZIP output.
 
@@ -95,6 +107,26 @@ ssmdconvert book pack novel.ssmdbook -o novel.ssmdbook.zip
 Readio can consume the public `load_book_workspace()` API directly. Neither loading nor metadata inspection automatically refreshes the manifest or adds Readio-specific manifest fields.
 
 ## SSMD analysis and speech workflows
+
+### Local spaCy and progress
+
+`book convert`, `report`, `txt`, and speech preparation commands accept
+`--spacy off|auto|sm|md|lg|trf`; the default is `off`, so spaCy is never loaded
+unless selected. `auto` resolves locally installed models for each effective
+language; explicit tiers fail clearly if the requested package is missing.
+SSMDConvert does not download models. Cache identity includes the selected
+provider/model and their versions, and compatible cache hits skip NLP inference.
+
+Language is resolved per prose run: the innermost inline SSMD language scope
+wins over the CLI/base-language override, which takes precedence over
+section/source language and fallback. Thus `--language de-DE` sets unscoped text
+to German without erasing an inline French span.
+
+Long-running commands accept `--progress` / `--no-progress`. Progress is
+automatic only when stderr is a TTY; Rich UI is used on a capable terminal, with
+plain stderr messages otherwise. Explicit `--progress` enables plain stderr
+events in non-TTY runs. Progress and warnings never pollute machine-readable
+stdout; `--no-progress` disables rendering.
 
 ```bash
 ssmdconvert report novel.ssmdbook.zip --chapters 2-20
