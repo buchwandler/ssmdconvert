@@ -8,8 +8,8 @@ from pathlib import Path
 from ssmd import parse_structure
 from typer.testing import CliRunner
 
+from ssmdconvert import load_document_bundle, load_document_workspace
 from ssmdconvert.cli import app
-from ssmdconvert.document_bundle import load_document_bundle
 
 runner = CliRunner()
 SSMD = (
@@ -115,11 +115,15 @@ def test_document_cli_validate_metadata_refresh_and_pack(tmp_path: Path) -> None
     converted = runner.invoke(app, ["document", "convert", str(source)])
     assert converted.exit_code == 0, converted.output
 
-    derived_files = {
-        bundle / "utterplan" / "cache.txt": "semantic state",
-        bundle / "renderplan" / "voice" / "state.toml": "renderer state",
+    unreferenced_files = {
+        bundle / "utterplan" / "arbitrary.txt": "utterplan stage output",
+        bundle / "renderplan" / "arbitrary.txt": "render plan output",
+        bundle / "voicerender" / "arbitrary.txt": "voice render output",
+        bundle / "audiocompose" / "arbitrary.txt": "audio composition output",
+        bundle / "audioexport" / "arbitrary.txt": "audio export output",
+        bundle / "tool-state" / "cache" / "state.json": "local cache state",
     }
-    for path, contents in derived_files.items():
+    for path, contents in unreferenced_files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(contents, encoding="utf-8")
 
@@ -149,8 +153,12 @@ def test_document_cli_validate_metadata_refresh_and_pack(tmp_path: Path) -> None
     refreshed = runner.invoke(app, ["document", "refresh", str(bundle)])
     assert refreshed.exit_code == 0, refreshed.output
     assert "Status: clean" in refreshed.output
-    for path, contents in derived_files.items():
+    for path, contents in unreferenced_files.items():
         assert path.read_text(encoding="utf-8") == contents
+
+    workspace = load_document_workspace(bundle)
+    assert workspace.dirty is False
+    assert workspace.document.ssmd == SSMD + "\nChanged.\n"
 
     archive = tmp_path / "packed.ssmdoc.zip"
     packed = runner.invoke(app, ["document", "pack", str(bundle), "-o", str(archive)])
@@ -158,5 +166,5 @@ def test_document_cli_validate_metadata_refresh_and_pack(tmp_path: Path) -> None
     assert load_document_bundle(archive).ssmd.endswith("Changed.\n")
     with zipfile.ZipFile(archive) as zipped:
         assert zipped.namelist() == ["manifest.json", "document.ssmd.md"]
-    for path, contents in derived_files.items():
+    for path, contents in unreferenced_files.items():
         assert path.read_text(encoding="utf-8") == contents

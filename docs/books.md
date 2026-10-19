@@ -75,7 +75,7 @@ ssmdconvert book refresh novel.ssmdbook
 ssmdconvert book pack novel.ssmdbook -o novel.ssmdbook.zip
 ```
 
-Directory readers load only manifest-referenced chapter files. Unreferenced workspace-local files and directories do not affect editable or strict validation and are never included in packed ZIPs. Consumers can use `load_book_workspace()` to read current valid edited text; loading and metadata inspection do not refresh the source manifest or add consumer-specific fields.
+The book source workspace is defined by `manifest.json` and its referenced chapter SSMD files. Edits to referenced chapters can make the workspace dirty under the existing digest semantics; unrelated local state is not a chapter or source member. `book pack` emits the portable representation and omits unreferenced files. Consumers may maintain their own non-source stage directories at workspace root; SSMDConvert does not own or interpret those directories. `load_book_workspace()` reads current valid edited text; loading and metadata inspection do not refresh the source manifest.
 The CLI infers formats only from `.ssmdbook` and `.ssmdbook.zip`. Use `--format directory` or `--format zip` for another output name. Existing outputs are refused by default. `--force` replaces the complete directory bundle or ZIP file atomically; directory output does not merge stale files.
 
 ## Python API

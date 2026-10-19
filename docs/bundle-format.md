@@ -72,7 +72,12 @@ The strict `load_book_bundle()` and `validate_book_bundle()` APIs validate direc
 
 The loader limits the manifest to 2 MiB, each referenced chapter to 64 MiB uncompressed, the total referenced chapter content to 512 MiB, and ZIP archives to 10,000 members. These bounds limit bundle content processed by the loader; they do not make bundle parsing a sandbox or establish general safety against every resource-exhaustion attack. Treat bundles as data and use the public validation API rather than reading archive paths directly.
 
-Directory readers load only `manifest.json` and its referenced chapter files. Arbitrary unreferenced workspace-local files and directories do not alter validation and are not members of the portable book format or packed ZIP output.
+## Workspace membership and portable output
+
+- A **portable bundle member** is a member defined by this book format.
+- A **manifest-referenced source member** is a chapter file named by `manifest.json`; it participates in validation, digest checking, and workspace freshness as described above.
+- An **unreferenced editable-workspace file** may exist locally, but is not part of the portable book bundle and does not alter validation.
+- A **packed ZIP member** is only a portable format member; packing omits unreferenced local files and directories.
 
 ZIP output uses fixed timestamps and deterministic member metadata. Bundle writes build and validate a complete temporary sibling before publication. Existing destinations are refused by default. With `overwrite=True`, a directory bundle replaces the complete prior directory and does not retain stale files.
 

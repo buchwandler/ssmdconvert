@@ -45,8 +45,7 @@ reports the workspace as dirty. `document metadata` shows this status.
 `refresh --check` never writes and exits non-zero for a dirty workspace;
 `refresh` explicitly updates the manifest digest and character count. `pack`
 creates a strict ZIP using the current valid text and fresh hashes without
-modifying the source workspace. Only manifest-referenced files are packed;
-Unreferenced workspace-local files and directories remain untouched and are excluded from packed ZIPs.
+modifying the source workspace. The manifest and its referenced canonical document define source truth. Unreferenced local files—including downstream stage directories—are not source members; workspace readers and validators follow the manifest, while pack/export emits only portable bundle members and leaves unrelated local files untouched.
 
 Strict bundle loading, validation, and ZIP handling verify the manifest, paths,
 SSMD 0.9 content, size bounds, and SHA-256 digests. See [Document bundle

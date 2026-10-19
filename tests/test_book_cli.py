@@ -12,7 +12,13 @@ from ssmd import parse_structure
 from typer.testing import CliRunner
 
 import ssmdconvert.cli as cli_module
-from ssmdconvert import BookConversionOptions, SpeechOptions, convert_book, load_book_bundle
+from ssmdconvert import (
+    BookConversionOptions,
+    SpeechOptions,
+    convert_book,
+    load_book_bundle,
+    load_book_workspace,
+)
 from ssmdconvert.cli import app
 
 runner = CliRunner()
@@ -273,7 +279,7 @@ def test_book_metadata_reports_dirty_workspace_before_stored_metadata(tmp_path: 
     assert result.output.index("Dirty chapters: 1") < result.output.index("Stored metadata")
 
 
-def test_book_pack_packs_dirty_workspace_without_unreferenced_derived_state_or_source_mutation(
+def test_book_pack_packs_dirty_workspace_without_unreferenced_local_state_or_source_mutation(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "book.epub"
@@ -289,13 +295,21 @@ def test_book_pack_packs_dirty_workspace_without_unreferenced_derived_state_or_s
     chapter_path = bundle / chapter_entry["path"]
     edited_text = chapter_path.read_text(encoding="utf-8") + "\n\nPacked current edit.\n"
     chapter_path.write_bytes(edited_text.encode("utf-8"))
-    derived_files = {
-        bundle / "utterplan" / "cache.txt": "semantic state",
-        bundle / "renderplan" / "voice" / "state.toml": "renderer state",
+    unreferenced_files = {
+        bundle / "utterplan" / "arbitrary.txt": "utterplan stage output",
+        bundle / "renderplan" / "arbitrary.txt": "render plan output",
+        bundle / "voicerender" / "arbitrary.txt": "voice render output",
+        bundle / "audiocompose" / "arbitrary.txt": "audio composition output",
+        bundle / "audioexport" / "arbitrary.txt": "audio export output",
+        bundle / "tool-state" / "cache" / "state.json": "local cache state",
     }
-    for path, contents in derived_files.items():
+    for path, contents in unreferenced_files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(contents, encoding="utf-8")
+
+    workspace = load_book_workspace(bundle)
+    assert workspace.dirty is True
+    assert workspace.book.chapters[0].ssmd == edited_text
 
     archive = tmp_path / "book.ssmdbook.zip"
     packed = runner.invoke(app, ["book", "pack", str(bundle), "-o", str(archive)])
@@ -311,7 +325,7 @@ def test_book_pack_packs_dirty_workspace_without_unreferenced_derived_state_or_s
             "chapters/chapter-0002.ssmd.md",
         ]
         assert zip_file.read(chapter_entry["path"]).decode("utf-8") == edited_text
-    for path, contents in derived_files.items():
+    for path, contents in unreferenced_files.items():
         assert path.read_text(encoding="utf-8") == contents
 
 

@@ -78,6 +78,13 @@ read-only and reports a dirty workspace as a failure. `document pack` creates a
 strict ZIP using current valid text and fresh hashes without refreshing or
 otherwise modifying the source workspace.
 
+## Workspace membership and portable output
+
+- A **portable bundle member** is one of the members defined by this document format: `manifest.json` and `document.ssmd.md`.
+- A **manifest-referenced source member** is the canonical document named by the manifest; it participates in validation, digest checking, and workspace freshness as described above.
+- An **unreferenced editable-workspace file** may exist locally, but is not source content and does not affect workspace validation.
+- A **packed ZIP member** is only a portable format member; packing omits unreferenced local files and directories.
+
 ## Path and resource safety
 
 Bundle paths must be normalized relative POSIX paths. Absolute paths, traversal,

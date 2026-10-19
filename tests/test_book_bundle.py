@@ -579,15 +579,16 @@ def test_refresh_workspace_updates_digest_char_count_and_restores_strict_validit
     assert load_book_bundle(directory).chapters[0].ssmd == edited_text
 
 
-def test_unreferenced_derived_state_is_ignored_by_workspace_and_strict_directory_validation(
+def test_unreferenced_local_state_is_ignored_by_workspace_and_strict_directory_validation(
     tmp_path: Path,
 ) -> None:
     directory, _manifest = _write_directory(tmp_path)
-    derived_files = {
+    unreferenced_files = {
         directory / "utterplan" / "cache.txt": "semantic state",
         directory / "renderplan" / "voice" / "state.toml": "renderer state",
+        directory / "tool-state" / "cache" / "state.json": "local cache state",
     }
-    for path, contents in derived_files.items():
+    for path, contents in unreferenced_files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(contents, encoding="utf-8")
 
@@ -595,7 +596,7 @@ def test_unreferenced_derived_state_is_ignored_by_workspace_and_strict_directory
     validate_book_bundle(directory)
     refresh_book_workspace(directory)
 
-    for path, contents in derived_files.items():
+    for path, contents in unreferenced_files.items():
         assert path.read_text(encoding="utf-8") == contents
     assert load_book_workspace(directory).dirty is False
     validate_book_bundle(directory)
