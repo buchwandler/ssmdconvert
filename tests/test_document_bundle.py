@@ -86,6 +86,7 @@ def test_refresh_updates_hash_count_preserves_manifest_mode_and_ignores_readio(
     bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
     manifest_path = bundle / "manifest.json"
     manifest_path.chmod(0o640)
+    manifest_mode = stat.S_IMODE(manifest_path.stat().st_mode)
     readio = bundle / ".readio" / "cache" / "state.json"
     readio.parent.mkdir(parents=True)
     readio.write_text("local state", encoding="utf-8")
@@ -97,7 +98,7 @@ def test_refresh_updates_hash_count_preserves_manifest_mode_and_ignores_readio(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["document"]["sha256"] == hashlib.sha256(edited.encode()).hexdigest()
     assert manifest["document"]["char_count"] == len(edited)
-    assert stat.S_IMODE(manifest_path.stat().st_mode) == 0o640
+    assert stat.S_IMODE(manifest_path.stat().st_mode) == manifest_mode
     assert refreshed.dirty is False
     assert readio.read_text(encoding="utf-8") == "local state"
     validate_document_bundle(bundle)
