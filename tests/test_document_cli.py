@@ -115,6 +115,14 @@ def test_document_cli_validate_metadata_refresh_and_pack(tmp_path: Path) -> None
     converted = runner.invoke(app, ["document", "convert", str(source)])
     assert converted.exit_code == 0, converted.output
 
+    derived_files = {
+        bundle / "utterplan" / "cache.txt": "semantic state",
+        bundle / "renderplan" / "voice" / "state.toml": "renderer state",
+    }
+    for path, contents in derived_files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
+
     validated = runner.invoke(app, ["document", "validate", str(bundle)])
     assert validated.exit_code == 0, validated.output
     assert "Valid document bundle" in validated.output
@@ -141,6 +149,8 @@ def test_document_cli_validate_metadata_refresh_and_pack(tmp_path: Path) -> None
     refreshed = runner.invoke(app, ["document", "refresh", str(bundle)])
     assert refreshed.exit_code == 0, refreshed.output
     assert "Status: clean" in refreshed.output
+    for path, contents in derived_files.items():
+        assert path.read_text(encoding="utf-8") == contents
 
     archive = tmp_path / "packed.ssmdoc.zip"
     packed = runner.invoke(app, ["document", "pack", str(bundle), "-o", str(archive)])
@@ -148,3 +158,5 @@ def test_document_cli_validate_metadata_refresh_and_pack(tmp_path: Path) -> None
     assert load_document_bundle(archive).ssmd.endswith("Changed.\n")
     with zipfile.ZipFile(archive) as zipped:
         assert zipped.namelist() == ["manifest.json", "document.ssmd.md"]
+    for path, contents in derived_files.items():
+        assert path.read_text(encoding="utf-8") == contents

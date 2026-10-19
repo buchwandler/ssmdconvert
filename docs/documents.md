@@ -46,7 +46,7 @@ reports the workspace as dirty. `document metadata` shows this status.
 `refresh` explicitly updates the manifest digest and character count. `pack`
 creates a strict ZIP using the current valid text and fresh hashes without
 modifying the source workspace. Only manifest-referenced files are packed;
-`.readio/` remains local state and is excluded.
+Unreferenced workspace-local files and directories remain untouched and are excluded from packed ZIPs.
 
 Strict bundle loading, validation, and ZIP handling verify the manifest, paths,
 SSMD 0.9 content, size bounds, and SHA-256 digests. See [Document bundle

@@ -110,7 +110,7 @@ Chapter selectors use original 1-based source numbers. Selected chapters remain 
 
 Book conversion defaults to `--speech-semantics freeze`, which materializes safe automatic speech decisions from `ttsready`/`spokenform` as explicit SSMD `sub` annotations without changing visible text. Freeze requires an effective language; use `--language` to set the base for unscoped text or select `--speech-semantics preserve` for structural-only conversion. Inline SSMD language spans and existing author-owned speech annotations remain authoritative.
 
-Editing a referenced chapter makes the directory workspace dirty, but workspace loading returns the actual valid SSMD instead of failing on a stale hash. `book metadata` reports clean/dirty status and dirty chapter count. Use `book refresh` to update manifest digests and character counts explicitly; `book refresh --check` does not mutate and exits non-zero when dirty or invalid. `book pack` creates a strict ZIP from current valid workspace contents without changing the source manifest. The reserved `.readio/` directory is downstream local state: it is ignored by validation and never included in ZIP output.
+Editing a referenced chapter makes the directory workspace dirty, but workspace loading returns the actual valid SSMD instead of failing on a stale hash. `book metadata` reports clean/dirty status and dirty chapter count. Use `book refresh` to update manifest digests and character counts explicitly; `book refresh --check` does not mutate and exits non-zero when dirty or invalid. `book pack` creates a strict ZIP from current valid workspace contents without changing the source manifest. Directory readers use only manifest-referenced source files; unreferenced workspace-local files and directories are ignored by validation and omitted from ZIP output.
 
 ```bash
 ssmdconvert book refresh novel.ssmdbook --check
@@ -118,7 +118,7 @@ ssmdconvert book refresh novel.ssmdbook
 ssmdconvert book pack novel.ssmdbook -o novel.ssmdbook.zip
 ```
 
-Readio can consume the public `load_book_workspace()` API directly. Neither loading nor metadata inspection automatically refreshes the manifest or adds Readio-specific manifest fields.
+Consumers can use the public `load_book_workspace()` API directly. Workspace loading and metadata inspection do not refresh the manifest or add consumer-specific fields.
 
 ## SSMD analysis and speech workflows
 

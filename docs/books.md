@@ -75,7 +75,7 @@ ssmdconvert book refresh novel.ssmdbook
 ssmdconvert book pack novel.ssmdbook -o novel.ssmdbook.zip
 ```
 
-`.readio/` is reserved for downstream local state. It is ignored by workspace and strict directory validation and is never included in a packed ZIP. Readio can consume edited text through `load_book_workspace()`; reading or rendering does not refresh the source manifest, and no Readio-specific fields are stored there.
+Directory readers load only manifest-referenced chapter files. Unreferenced workspace-local files and directories do not affect editable or strict validation and are never included in packed ZIPs. Consumers can use `load_book_workspace()` to read current valid edited text; loading and metadata inspection do not refresh the source manifest or add consumer-specific fields.
 The CLI infers formats only from `.ssmdbook` and `.ssmdbook.zip`. Use `--format directory` or `--format zip` for another output name. Existing outputs are refused by default. `--force` replaces the complete directory bundle or ZIP file atomically; directory output does not merge stale files.
 
 ## Python API

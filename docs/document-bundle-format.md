@@ -94,9 +94,7 @@ attack. Treat bundles as data and use the public validation API.
 Writes build and validate a complete temporary artifact before publication.
 Existing destinations are refused by default. With overwrite enabled, a
 complete directory workspace is replaced rather than merged, and ZIP output is
-published atomically. The optional workspace-local `.readio/` directory is
-reserved for downstream state: it is not referenced by the manifest and is
-never included in a packed ZIP.
+published atomically. Unreferenced workspace-local files and directories do not affect workspace validation and are never included in portable ZIP output.
 
 See [Single-document SSMD workspaces](documents.md) for CLI usage and the public
 Python API.

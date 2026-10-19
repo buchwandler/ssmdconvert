@@ -80,16 +80,23 @@ def test_strict_loader_rejects_dirty_workspace_but_workspace_loads_it(tmp_path: 
         load_document_bundle(bundle)
 
 
-def test_refresh_updates_hash_count_preserves_manifest_mode_and_ignores_readio(
+def test_refresh_preserves_manifest_mode_and_unreferenced_derived_state(
     tmp_path: Path,
 ) -> None:
     bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
     manifest_path = bundle / "manifest.json"
     manifest_path.chmod(0o640)
     manifest_mode = stat.S_IMODE(manifest_path.stat().st_mode)
-    readio = bundle / ".readio" / "cache" / "state.json"
-    readio.parent.mkdir(parents=True)
-    readio.write_text("local state", encoding="utf-8")
+    derived_files = {
+        bundle / "utterplan" / "cache.txt": "semantic state",
+        bundle / "renderplan" / "voice" / "state.toml": "renderer state",
+    }
+    for path, contents in derived_files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
+
+    validate_document_bundle(bundle)
+    assert load_document_workspace(bundle).dirty is False
     edited = SSMD + "\nMore text.\n"
     (bundle / "document.ssmd.md").write_text(edited, encoding="utf-8")
 
@@ -100,7 +107,8 @@ def test_refresh_updates_hash_count_preserves_manifest_mode_and_ignores_readio(
     assert manifest["document"]["char_count"] == len(edited)
     assert stat.S_IMODE(manifest_path.stat().st_mode) == manifest_mode
     assert refreshed.dirty is False
-    assert readio.read_text(encoding="utf-8") == "local state"
+    for path, contents in derived_files.items():
+        assert path.read_text(encoding="utf-8") == contents
     validate_document_bundle(bundle)
 
 

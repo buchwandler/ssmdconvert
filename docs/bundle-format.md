@@ -72,7 +72,7 @@ The strict `load_book_bundle()` and `validate_book_bundle()` APIs validate direc
 
 The loader limits the manifest to 2 MiB, each referenced chapter to 64 MiB uncompressed, the total referenced chapter content to 512 MiB, and ZIP archives to 10,000 members. These bounds limit bundle content processed by the loader; they do not make bundle parsing a sandbox or establish general safety against every resource-exhaustion attack. Treat bundles as data and use the public validation API rather than reading archive paths directly.
 
-Directory readers load only `manifest.json` and its referenced chapter files. Arbitrary workspace-local files do not alter validation; `.readio/` is reserved for downstream local state. It is not part of the portable book format, and pack output never includes it.
+Directory readers load only `manifest.json` and its referenced chapter files. Arbitrary unreferenced workspace-local files and directories do not alter validation and are not members of the portable book format or packed ZIP output.
 
 ZIP output uses fixed timestamps and deterministic member metadata. Bundle writes build and validate a complete temporary sibling before publication. Existing destinations are refused by default. With `overwrite=True`, a directory bundle replaces the complete prior directory and does not retain stale files.
 
@@ -88,7 +88,7 @@ ssmdconvert book refresh novel.ssmdbook --check
 ssmdconvert book pack novel.ssmdbook -o novel.ssmdbook.zip
 ```
 
-`refresh` validates the chapters and atomically updates manifest chapter digests and `char_count` values. `--check` performs no writes and exits successfully only when the workspace is valid and clean. `pack` reads the current valid chapter contents and writes canonical ZIP members with fresh digests; it does not update the workspace manifest. The ZIP omits `.readio/` and other unreferenced local files. Rendering or inspecting a workspace never refreshes it automatically, and no Readio-specific metadata is stored in `manifest.json`.
+`refresh` validates the chapters and atomically updates manifest chapter digests and `char_count` values. `--check` performs no writes and exits successfully only when the workspace is valid and clean. `pack` reads the current valid chapter contents and writes canonical ZIP members with fresh digests; it does not update the workspace manifest. Unreferenced local files and directories are ignored by validation and omitted from ZIP output. Rendering or inspecting a workspace never refreshes it automatically, and the manifest contains no consumer-specific metadata.
 
 ## Python API
 
@@ -117,4 +117,4 @@ For EPUB conversion, use `convert_book(source, options=BookConversionOptions(...
 and pass `result.book` to `write_book_bundle()` when publication is intended.
 The writer requires an explicit format and does not reread the original EPUB.
 See [Python API](api.md) for the v0.2 result/options contract and [books](books.md)
-for workspace and Readio handoff examples.
+for workspace handoff examples.

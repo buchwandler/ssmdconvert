@@ -273,7 +273,9 @@ def test_book_metadata_reports_dirty_workspace_before_stored_metadata(tmp_path: 
     assert result.output.index("Dirty chapters: 1") < result.output.index("Stored metadata")
 
 
-def test_book_pack_packs_dirty_workspace_without_readio_or_source_mutation(tmp_path: Path) -> None:
+def test_book_pack_packs_dirty_workspace_without_unreferenced_derived_state_or_source_mutation(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "book.epub"
     make_epub(source)
     bundle = tmp_path / "book.ssmdbook"
@@ -287,9 +289,13 @@ def test_book_pack_packs_dirty_workspace_without_readio_or_source_mutation(tmp_p
     chapter_path = bundle / chapter_entry["path"]
     edited_text = chapter_path.read_text(encoding="utf-8") + "\n\nPacked current edit.\n"
     chapter_path.write_bytes(edited_text.encode("utf-8"))
-    local_state = bundle / ".readio" / "cache"
-    local_state.mkdir(parents=True)
-    (local_state / "state.json").write_text("downstream-only", encoding="utf-8")
+    derived_files = {
+        bundle / "utterplan" / "cache.txt": "semantic state",
+        bundle / "renderplan" / "voice" / "state.toml": "renderer state",
+    }
+    for path, contents in derived_files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
 
     archive = tmp_path / "book.ssmdbook.zip"
     packed = runner.invoke(app, ["book", "pack", str(bundle), "-o", str(archive)])
@@ -304,8 +310,9 @@ def test_book_pack_packs_dirty_workspace_without_readio_or_source_mutation(tmp_p
             "chapters/chapter-0001.ssmd.md",
             "chapters/chapter-0002.ssmd.md",
         ]
-        assert not any(name.startswith(".readio/") for name in zip_file.namelist())
         assert zip_file.read(chapter_entry["path"]).decode("utf-8") == edited_text
+    for path, contents in derived_files.items():
+        assert path.read_text(encoding="utf-8") == contents
 
 
 def test_book_convert_freezes_by_default_and_supports_preserve_mode(tmp_path: Path) -> None:
