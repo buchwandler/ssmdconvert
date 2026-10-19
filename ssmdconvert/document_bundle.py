@@ -55,6 +55,15 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _normalize_newlines(text: str) -> str:
+    """Use LF for document content and digests on every platform."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _canonical_document_bytes(text: str) -> bytes:
+    return _normalize_newlines(text).encode("utf-8", errors="strict")
+
+
 def _validate_relative_path(value: Any, display: str, *, allow_directory: bool = False) -> str:
     if not isinstance(value, str) or not value or "\x00" in value:
         _invalid(display, f"invalid bundle path: {value!r}")
@@ -217,6 +226,7 @@ def _manifest_for_document(document: SsmdDocument) -> tuple[bytes, bytes]:
     try:
         validate_ssmd_document(document.ssmd)
         document_bytes = document.ssmd.encode("utf-8", errors="strict")
+        canonical_document_bytes = _canonical_document_bytes(document.ssmd)
     except Exception as exc:
         raise DocumentBundleValidationError(
             f"document does not contain valid UTF-8 SSMD 0.9: {exc}"
@@ -256,8 +266,8 @@ def _manifest_for_document(document: SsmdDocument) -> tuple[bytes, bytes]:
         "document": {
             "id": _DOCUMENT_ID,
             "path": _DOCUMENT_PATH,
-            "char_count": len(document.ssmd),
-            "sha256": _sha256(document_bytes),
+            "char_count": len(_normalize_newlines(document.ssmd)),
+            "sha256": _sha256(canonical_document_bytes),
         },
     }
     if not isinstance(document.source.format, str) or not document.source.format:
@@ -324,14 +334,15 @@ def _document_from_manifest(
 ) -> SsmdDocument:
     entry = manifest["document"]
     raw = read_bytes(entry["path"])
-    actual_sha256 = _sha256(raw)
-    dirty = actual_sha256 != entry["sha256"]
-    if verify_sha256 and dirty:
-        _invalid(display, f"SHA256 mismatch for document {entry['path']!r}")
     try:
         text = raw.decode("utf-8", errors="strict")
     except UnicodeDecodeError as exc:
         _invalid(display, f"document {entry['path']!r} is not UTF-8: {exc}")
+    text = _normalize_newlines(text)
+    actual_sha256 = _sha256(text.encode("utf-8"))
+    dirty = actual_sha256 != entry["sha256"]
+    if verify_sha256 and dirty:
+        _invalid(display, f"SHA256 mismatch for document {entry['path']!r}")
     try:
         validate_ssmd_document(text)
     except Exception as exc:

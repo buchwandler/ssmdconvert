@@ -47,8 +47,9 @@ A manifest has this shape (digests abbreviated):
 `metadata` contains effective document metadata without the reserved
 `ssmd_version` key. `source.sha256` is the hash of the original input bytes,
 captured during conversion; bundle publication does not reread the source.
-`document.sha256` hashes the exact stored UTF-8 SSMD bytes, and `char_count` is
-the Python character count. The canonical document identity and path are fixed
+`document.sha256` hashes the canonical UTF-8 SSMD bytes after normalizing
+line endings to LF, and `char_count` is the Python character count of that
+canonical text. The canonical document identity and path are fixed
 as `document-0001` and `document.ssmd.md`.
 
 An optional `speech_semantics` object stores speech-provenance fields when a
