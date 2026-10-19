@@ -1,0 +1,2752 @@
+ README.md                                   |  14 +
+ docs/analysis-workflows.md                  |  11 +-
+ docs/api.md                                 |  30 +-
+ docs/bundle-format.md                       |   2 +
+ docs/document-bundle-format.md              | 101 ++++
+ docs/documents.md                           | 105 ++++
+ docs/index.md                               |   2 +
+ docs/usage.md                               |  15 +
+ ssmdconvert/__init__.py                     |  24 +
+ ssmdconvert/analysis/context.py             |   4 +-
+ ssmdconvert/analysis/models.py              |   4 +-
+ ssmdconvert/analysis/prepare.py             |   6 +-
+ ssmdconvert/analysis/reporting.py           |   3 +-
+ ssmdconvert/analysis/source.py              | 114 ++++-
+ ssmdconvert/bundle.py                       |  28 +-
+ ssmdconvert/cli.py                          | 288 ++++++++++-
+ ssmdconvert/document_bundle.py              | 718 ++++++++++++++++++++++++++++
+ ssmdconvert/errors.py                       |   8 +
+ ssmdconvert/models.py                       |  32 ++
+ ssmdconvert/services/document_conversion.py | 125 +++++
+ tests/test_analysis_source.py               | 106 +++-
+ tests/test_api_facade.py                    |  18 +
+ tests/test_cli.py                           |  24 +-
+ tests/test_document_bundle.py               | 200 ++++++++
+ tests/test_document_cli.py                  | 150 ++++++
+ tests/test_document_speech.py               | 126 +++++
+ 26 files changed, 2215 insertions(+), 43 deletions(-)
+
+diff --git a/README.md b/README.md
+index 7eaa5c6..939d157 100644
+--- a/README.md
++++ b/README.md
+@@ -81,6 +81,20 @@ ssmdconvert convert manuscript.md -o manuscript.ssmd
+ ssmdconvert book convert novel.epub --language de-DE --metadata-file book-metadata.yaml -o novel.ssmdbook
+ ```
+
++## Create a single-document workspace
++
++Keep an SSMD document in an editable `.ssmdoc` workspace or a portable ZIP without changing the existing standalone `convert` command:
++
++```bash
++ssmdconvert document convert story.ssmd.md
++ssmdconvert document validate story.ssmdoc
++ssmdconvert document pack story.ssmdoc -o story.ssmdoc.zip
++ssmdconvert report story.ssmdoc
++ssmdconvert speech freeze story.ssmdoc -o frozen.ssmdoc.zip
++```
++
++A valid SSMD source is copied losslessly when no metadata override is supplied. Dirty workspaces use their current valid text for analysis; refresh is explicit, and speech write-back publishes a new bundle rather than mutating the source. See the [single-document workspace guide](docs/documents.md) and [document bundle format](docs/document-bundle-format.md).
++
+ ## Convert an EPUB book
+
+ ```bash
+diff --git a/docs/analysis-workflows.md b/docs/analysis-workflows.md
+index 87ed614..c39fc68 100644
+--- a/docs/analysis-workflows.md
++++ b/docs/analysis-workflows.md
+@@ -16,9 +16,10 @@ spokenform → ttsready → ssmdconvert
+ and QA; `ssmdconvert` owns SSMD application semantics and write-back. `ssmdconvert`
+ depends directly on the public `ttsready` API, not on `spokenform`.
+
+-The commands accept a standalone `.ssmd`/`.ssmd.md` file, a validated
+-`.ssmdbook.zip`, or an editable `.ssmdbook/` directory workspace. Chapter selectors
+-are original 1-based source chapter numbers and preserve source order.
++The commands accept standalone `.ssmd`/`.ssmd.md` files, validated `.ssmdbook.zip`
++or `.ssmdoc.zip` artifacts, and editable `.ssmdbook/` or `.ssmdoc/` directories.
++Book selectors use original 1-based source chapter numbers and preserve source
++order; a document bundle exposes the single section `document-0001`.
+
+ ## Python API and cache boundary
+
+@@ -148,12 +149,12 @@ edits, and preserves visible text. Existing authoritative SSMD speech semantics
+ are not duplicated. Unresolved effective language or unsafe mapping prevents
+ write-back.
+
+-Speech writes require a new destination by default. Standalone SSMD and book
++Speech writes require a new destination by default. Standalone SSMD, book, and document
+ outputs are written atomically, existing destinations require `--force`, and the
+ input cannot be overwritten even with `--force`. Dirty directory workspaces are
+ read as-is, but output must be outside the source workspace; selected chapters
+ are updated in the new bundle while unselected chapters remain unchanged. For
+-bundle destinations use `.ssmdbook` for a directory or `.ssmdbook.zip` for a ZIP,
++bundle destinations use `.ssmdbook`/`.ssmdoc` for a directory or `.ssmdbook.zip`/`.ssmdoc.zip` for a ZIP,
+ or pass `--format directory|zip`.
+
+ ## Cache and data handling
+diff --git a/docs/api.md b/docs/api.md
+index 13e3984..7253cbe 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -60,6 +60,34 @@ available for callers that need adapter control.
+ :members:
+ ```
+
++## Rendered SSMD document workspaces
++
++`SsmdDocument` represents a rendered SSMD artifact with source provenance; it is distinct from the normalized source-neutral `Document`. `convert_document_artifact()` builds the artifact, and publication remains explicit through `write_document_bundle()`:
++
++```python
++from ssmdconvert import (
++    DocumentWorkspace,
++    SsmdDocument,
++    WorkspaceDocumentStatus,
++    convert_document_artifact,
++    load_document_bundle,
++    load_document_workspace,
++    refresh_document_workspace,
++    validate_document_bundle,
++    write_document_bundle,
++)
++
++artifact: SsmdDocument = convert_document_artifact("story.ssmd.md")
++write_document_bundle(artifact, "story.ssmdoc", format="directory")
++loaded: SsmdDocument = load_document_bundle("story.ssmdoc")
++workspace: DocumentWorkspace = load_document_workspace("story.ssmdoc")
++status: WorkspaceDocumentStatus = workspace.status
++refreshed = refresh_document_workspace("story.ssmdoc")
++validate_document_bundle("story.ssmdoc")
++```
++
++`load_document_bundle()` strictly loads a directory or ZIP. `load_document_workspace()` accepts only a directory and returns current valid SSMD even when the recorded digest is stale; it reports dirty state without rewriting the manifest. See [Single-document SSMD workspaces](documents.md) for the CLI lifecycle and [`.ssmdoc` bundle format](document-bundle-format.md) for integrity and security rules.
++
+ ## EPUB books
+
+ `convert_book()` returns `BookConversionResult`, not a bare `Book`. The result
+@@ -123,7 +151,7 @@ Failed freezes raise `SpeechFreezeFailure` with structured partial evidence.
+
+ ## SSMD analysis, reports, and TXT
+
+-`analyze_ssmd()` accepts standalone SSMD, a validated SSMD book/workspace path,
++`analyze_ssmd()` accepts standalone SSMD, a validated `.ssmdbook` or `.ssmdoc` bundle/workspace path,
+ or an in-memory `Book` or `BookConversionResult`. In-memory books are adapted
+ with `loaded_source_from_book`; analysis does not write a temporary bundle.
+ Analysis and projection are separate, so a report can reuse the exact projection
+diff --git a/docs/bundle-format.md b/docs/bundle-format.md
+index 6d69938..598820f 100644
+--- a/docs/bundle-format.md
++++ b/docs/bundle-format.md
+@@ -2,6 +2,8 @@
+
+ A directory ending in `.ssmdbook/` is the canonical editable book workspace; a `.ssmdbook.zip` is an immutable portable artifact. Both use the same versioned manifest model. `load_book_bundle()` and `validate_book_bundle()` remain strict for both formats, including recorded chapter digests. Use the separate workspace API to inspect edited directory chapters whose digests are stale.
+
++This page describes the book format only. Single-document `.ssmdoc` artifacts use a distinct manifest and API; see [`.ssmdoc` bundle format](document-bundle-format.md).
++
+ ```text
+ format:         ssmdconvert.book
+ schema_version: 1
+diff --git a/docs/document-bundle-format.md b/docs/document-bundle-format.md
+new file mode 100644
+index 0000000..fc3d105
+--- /dev/null
++++ b/docs/document-bundle-format.md
+@@ -0,0 +1,101 @@
++# `.ssmdoc` bundle format
++
++`.ssmdoc` is a versioned single-document artifact, not a one-chapter
++`.ssmdbook`. Its manifest format is `ssmdconvert.document`; the current schema
++version is `1` and the stored document is validated as SSMD `0.9`.
++
++A directory bundle is the canonical editable workspace:
++
++```text
++story.ssmdoc/
++├── manifest.json
++└── document.ssmd.md
++```
++
++The equivalent portable ZIP has exactly the canonical members `manifest.json`
++and `document.ssmd.md` in that order. ZIP timestamps and member metadata are
++fixed for deterministic output.
++
++## Manifest
++
++A manifest has this shape (digests abbreviated):
++
++```json
++{
++  "format": "ssmdconvert.document",
++  "schema_version": 1,
++  "ssmd_version": "0.9",
++  "metadata": {
++    "title": "Example",
++    "language": "en-US"
++  },
++  "source": {
++    "format": "markdown",
++    "media_type": "text/markdown",
++    "name": "story.md",
++    "sha256": "<64 lowercase hexadecimal characters>"
++  },
++  "document": {
++    "id": "document-0001",
++    "path": "document.ssmd.md",
++    "char_count": 42,
++    "sha256": "<64 lowercase hexadecimal characters>"
++  }
++}
++```
++
++`metadata` contains effective document metadata without the reserved
++`ssmd_version` key. `source.sha256` is the hash of the original input bytes,
++captured during conversion; bundle publication does not reread the source.
++`document.sha256` hashes the exact stored UTF-8 SSMD bytes, and `char_count` is
++the Python character count. The canonical document identity and path are fixed
++as `document-0001` and `document.ssmd.md`.
++
++An optional `speech_semantics` object stores speech-provenance fields when a
++speech operation has materialized decisions. Its source digest must match
++`source.sha256`. Normal document conversion does not require this field.
++
++Manifest JSON is UTF-8, strict JSON, and serialized deterministically. Metadata
++must be JSON-compatible; NaN and Infinity are rejected.
++
++## Strict bundles and editable workspaces
++
++`load_document_bundle()` and `validate_document_bundle()` strictly verify either
++a directory or ZIP: manifest fields and versions, canonical paths, source digest
++shape, document digest, UTF-8, and SSMD 0.9 validity. A stale document digest
++makes a directory invalid as a strict bundle.
++
++`load_document_workspace()` is the relaxed directory-workspace API. It still
++validates the manifest and safely reads and validates the current document, but
++returns that text when its digest differs and reports the expected digest,
++actual digest, and `dirty` state. It does not change files. ZIP artifacts never
++use relaxed digest handling.
++
++Use `ssmdconvert document refresh WORKSPACE` as the explicit operation that
++updates the manifest digest and character count after editing. `--check` is
++read-only and reports a dirty workspace as a failure. `document pack` creates a
++strict ZIP using current valid text and fresh hashes without refreshing or
++otherwise modifying the source workspace.
++
++## Path and resource safety
++
++Bundle paths must be normalized relative POSIX paths. Absolute paths, traversal,
++`.`/`..` components, Windows drive paths, backslashes, NUL bytes, symlink
++escapes, duplicate ZIP names, and ZIP symlinks are rejected. The document path
++must equal the canonical path shown above. Directory reads are limited to
++manifest-referenced files; unrelated files do not become bundle content.
++
++The manifest is limited to 2 MiB, the document to 64 MiB, and a ZIP to 10,000
++members. These bounds limit bundle content processed by the loader; they do not
++make parsing a sandbox or guarantee safety against every resource-exhaustion
++attack. Treat bundles as data and use the public validation API.
++
++Writes build and validate a complete temporary artifact before publication.
++Existing destinations are refused by default. With overwrite enabled, a
++complete directory workspace is replaced rather than merged, and ZIP output is
++published atomically. The optional workspace-local `.readio/` directory is
++reserved for downstream state: it is not referenced by the manifest and is
++never included in a packed ZIP.
++
++See [Single-document SSMD workspaces](documents.md) for CLI usage and the public
++Python API.
+diff --git a/docs/documents.md b/docs/documents.md
+new file mode 100644
+index 0000000..c9fb425
+--- /dev/null
++++ b/docs/documents.md
+@@ -0,0 +1,105 @@
++# Single-document SSMD workspaces
++
++Use the `document` command group to place one rendered SSMD document in a managed
++`.ssmdoc` workspace. This is separate from the existing top-level `convert`
++command: `ssmdconvert convert SOURCE` continues to write a standalone `.ssmd`
++file, and `book convert` continues to create an `.ssmdbook`.
++
++## Convert a document
++
++```bash
++ssmdconvert document convert story.ssmd.md
++# creates story.ssmdoc/
++
++ssmdconvert document convert notes.md -o notes.ssmdoc.zip
++ssmdconvert document convert report.docx -o reviewed.ssmdoc --language en-US
++```
++
++When output is omitted, the workspace is created beside the source. `.ssmdoc`
++selects a directory and `.ssmdoc.zip` selects a ZIP artifact; other output names
++require `--format directory` or `--format zip`. Existing destinations are
++refused unless `--force` is supplied. Forced directory writes replace the whole
++workspace rather than merging files.
++
++Already-valid `.ssmd` and `.ssmd.md` input is validated as SSMD 0.9. With no
++metadata-changing options, its exact UTF-8 document bytes and author-owned SSMD
++annotations are preserved. Explicit metadata or sequence-policy overrides use
++the normal conversion pipeline. Ordinary non-SSMD inputs use the same adapters
++as `ssmdconvert convert`. `document convert` does not automatically freeze
++speech decisions; use the speech commands when write-back is wanted.
++
++## Inspect and maintain workspaces
++
++```bash
++ssmdconvert document inspect story.ssmd.md [--json]
++ssmdconvert document validate story.ssmdoc [--json]
++ssmdconvert document metadata story.ssmdoc [--json]
++ssmdconvert document refresh story.ssmdoc --check
++ssmdconvert document refresh story.ssmdoc
++ssmdconvert document pack story.ssmdoc -o story.ssmdoc.zip
++```
++
++A `.ssmdoc/` directory is editable. Editing `document.ssmd.md` makes its
++recorded digest stale, but workspace loading uses the current valid SSMD and
++reports the workspace as dirty. `document metadata` shows this status.
++`refresh --check` never writes and exits non-zero for a dirty workspace;
++`refresh` explicitly updates the manifest digest and character count. `pack`
++creates a strict ZIP using the current valid text and fresh hashes without
++modifying the source workspace. Only manifest-referenced files are packed;
++`.readio/` remains local state and is excluded.
++
++Strict bundle loading, validation, and ZIP handling verify the manifest, paths,
++SSMD 0.9 content, size bounds, and SHA-256 digests. See [Document bundle
++format](document-bundle-format.md) for the manifest and security rules.
++
++## Analysis and speech
++
++A document bundle is a single analysis section identified as `document-0001`.
++It can be passed directly to the generic report, TXT, context, and speech audit
++commands. For example:
++
++```bash
++ssmdconvert report story.ssmdoc
++ssmdconvert report story.ssmdoc.zip --format json
++ssmdconvert txt story.ssmdoc -o story.txt
++ssmdconvert speech audit story.ssmdoc --json
++ssmdconvert speech freeze story.ssmdoc -o frozen.ssmdoc
++ssmdconvert speech freeze story.ssmdoc -o frozen.ssmdoc.zip
++```
++
++Speech write-back checks that the current document still matches the analyzed
++content before publishing. It writes a new document bundle with speech
++provenance and never mutates the source workspace. Existing destinations still
++require `--force`.
++
++## Python API
++
++The rendered artifact (`SsmdDocument`) is distinct from the source-neutral
++`Document` model returned by `convert_document()`. The artifact builder captures
++source provenance, while bundle publication is explicit:
++
++```python
++from ssmdconvert import (
++    DocumentWorkspace,
++    SsmdDocument,
++    WorkspaceDocumentStatus,
++    convert_document_artifact,
++    load_document_bundle,
++    load_document_workspace,
++    refresh_document_workspace,
++    validate_document_bundle,
++    write_document_bundle,
++)
++
++artifact: SsmdDocument = convert_document_artifact("story.ssmd.md")
++write_document_bundle(artifact, "story.ssmdoc", format="directory")
++loaded: SsmdDocument = load_document_bundle("story.ssmdoc")
++workspace: DocumentWorkspace = load_document_workspace("story.ssmdoc")
++status: WorkspaceDocumentStatus = workspace.status
++refreshed = refresh_document_workspace("story.ssmdoc")
++validate_document_bundle("story.ssmdoc")
++```
++
++The strict loader accepts a directory bundle or ZIP. The workspace loader only
++accepts a directory and returns valid current text even if its stored document
++digest is stale. Neither load operation refreshes the manifest.
+diff --git a/docs/index.md b/docs/index.md
+index f8733a3..03f3ff0 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -45,6 +45,8 @@ speech-annotations
+ freeze
+ analysis-cache
+ migration-from-ttsready-cli
++documents
++document-bundle-format
+ books
+ bundle-format
+ api
+diff --git a/docs/usage.md b/docs/usage.md
+index f5c5b24..d41f697 100644
+--- a/docs/usage.md
++++ b/docs/usage.md
+@@ -77,6 +77,21 @@ Book output format is inferred only from `.ssmdbook` (directory) and `.ssmdbook.
+
+ Use `ssmdconvert book metadata BUNDLE` to display validated metadata stored in either a directory or ZIP bundle. Add `--json` for a deterministic `{"metadata": ...}` object. The human form labels absent known values as `not set` and renders nested values indented.
+
++## Single-document workspaces
++
++Use `document convert` to create a managed single-document workspace without changing the standalone behavior of top-level `convert`:
++
++```bash
++ssmdconvert document convert story.ssmd.md
++ssmdconvert document convert story.ssmd.md -o reviewed.ssmdoc.zip
++ssmdconvert document metadata reviewed.ssmdoc.zip --json
++ssmdconvert document validate reviewed.ssmdoc
++ssmdconvert document refresh reviewed.ssmdoc --check
++ssmdconvert document pack reviewed.ssmdoc -o reviewed.ssmdoc.zip
++```
++
++Directory `.ssmdoc` workspaces are editable; ZIP artifacts are strict and portable. A valid SSMD source is preserved byte-for-byte when no metadata override is requested. Dirty workspaces can be analyzed using current valid text, refreshed explicitly, or packed without modifying the workspace. See [Single-document SSMD workspaces](documents.md) and [`.ssmdoc` bundle format](document-bundle-format.md) for details.
++
+ ## SSMD analysis and speech commands
+
+ Use the shared SSMD-aware analysis commands for reports, context lookup, prepared TXT, and speech write-back:
+diff --git a/ssmdconvert/__init__.py b/ssmdconvert/__init__.py
+index e73dbb6..39b03e3 100644
+--- a/ssmdconvert/__init__.py
++++ b/ssmdconvert/__init__.py
+@@ -33,11 +33,20 @@ from .bundle import (
+     write_book_bundle,
+ )
+ from .converter import Converter
++from .document_bundle import (
++    load_document_bundle,
++    load_document_workspace,
++    refresh_document_workspace,
++    validate_document_bundle,
++    write_document_bundle,
++)
+ from .errors import (
+     BookBundleError,
+     BookBundleValidationError,
+     BookError,
+     ChapterSelectionError,
++    DocumentBundleError,
++    DocumentBundleValidationError,
+     LinguisticsError,
+     MissingDependencyError,
+     SSMDConvertError,
+@@ -53,9 +62,12 @@ from .models import (
+     BookWorkspace,
+     ConversionResult,
+     Document,
++    DocumentWorkspace,
+     Section,
+     SourceInfo,
++    SsmdDocument,
+     WorkspaceChapterStatus,
++    WorkspaceDocumentStatus,
+ )
+ from .options import (
+     AnalysisOptions,
+@@ -71,6 +83,7 @@ from .results import (
+     SpeechOutcome,
+     SsmdChangeContext,
+ )
++from .services.document_conversion import convert_document_artifact
+
+ try:
+     from ._version import version as __version__
+@@ -119,8 +132,11 @@ __all__ = [
+     "ChapterSelectionError",
+     "ConversionResult",
+     "Converter",
++    "DocumentBundleError",
++    "DocumentBundleValidationError",
+     "Document",
+     "DocumentConversionOptions",
++    "DocumentWorkspace",
+     "LinguisticsConfig",
+     "LinguisticsError",
+     "MissingDependencyError",
+@@ -135,6 +151,7 @@ __all__ = [
+     "SpeechFreezeFailure",
+     "ProjectedText",
+     "Section",
++    "SsmdDocument",
+     "SourceInfo",
+     "SpeechOptions",
+     "SpeechOutcome",
+@@ -143,6 +160,7 @@ __all__ = [
+     "UnsupportedBookSourceError",
+     "UnsupportedInputError",
+     "WorkspaceChapterStatus",
++    "WorkspaceDocumentStatus",
+     "__version__",
+     "analyze_cached",
+     "analyze_ssmd",
+@@ -151,6 +169,7 @@ __all__ = [
+     "convert_book",
+     "convert_content",
+     "convert_document",
++    "convert_document_artifact",
+     "freeze_speech",
+     "inspect_book",
+     "inspect_document",
+@@ -162,4 +181,9 @@ __all__ = [
+     "refresh_book_workspace",
+     "validate_book_bundle",
+     "write_book_bundle",
++    "load_document_bundle",
++    "load_document_workspace",
++    "refresh_document_workspace",
++    "validate_document_bundle",
++    "write_document_bundle",
+ ]
+diff --git a/ssmdconvert/analysis/context.py b/ssmdconvert/analysis/context.py
+index be8da0a..a47b022 100644
+--- a/ssmdconvert/analysis/context.py
++++ b/ssmdconvert/analysis/context.py
+@@ -8,7 +8,7 @@ from typing import Any
+
+ import ttsready
+
+-from ..bundle import read_current_chapter_bytes
++from ..bundle import read_current_section_bytes
+ from ..errors import AnalysisCacheError, ContextLookupError
+ from .cache import AnalysisCache
+ from .fingerprints import sha256_bytes
+@@ -45,7 +45,7 @@ def lookup_context(
+     if section_entry is None:
+         raise AnalysisCacheError(f"cached change {change_id!r} references an unselected section")
+     try:
+-        current_bytes = read_current_chapter_bytes(source, section_id)
++        current_bytes = read_current_section_bytes(source, section_id)
+     except Exception as exc:
+         raise ContextLookupError(
+             f"Analysis cache is stale for {section_id}. "
+diff --git a/ssmdconvert/analysis/models.py b/ssmdconvert/analysis/models.py
+index 3ad7063..f1d7d44 100644
+--- a/ssmdconvert/analysis/models.py
++++ b/ssmdconvert/analysis/models.py
+@@ -37,8 +37,8 @@ class LoadedSsmdSource:
+     """Validated SSMD content plus application-level source/workspace identity."""
+
+     path: Path
+-    kind: Literal["ssmd", "ssmdbook"]
+-    input_format: Literal["ssmd", "ssmdbook"]
++    kind: Literal["ssmd", "ssmdoc", "ssmdbook"]
++    input_format: Literal["ssmd", "ssmdoc", "ssmdbook"]
+     title: str | None
+     metadata: Mapping[str, Any]
+     sections: tuple[LoadedSsmdSection, ...]
+diff --git a/ssmdconvert/analysis/prepare.py b/ssmdconvert/analysis/prepare.py
+index 40664c8..26ed6d2 100644
+--- a/ssmdconvert/analysis/prepare.py
++++ b/ssmdconvert/analysis/prepare.py
+@@ -352,7 +352,9 @@ def analyze_ssmd_source(
+         preparation = prepared_result
+
+     issues = [*extracted.issues, *fallback_issues]
++    dirty_label = "document" if loaded.kind == "ssmdoc" else "chapters"
+     if loaded.workspace_status == "dirty":
++        dirty_value = ", ".join(loaded.dirty_chapters)
+         issues.append(
+             SsmdAnalysisIssue(
+                 code="workspace.dirty",
+@@ -363,9 +365,7 @@ def analyze_ssmd_source(
+                 clean_end=None,
+                 raw_source_start=None,
+                 raw_source_end=None,
+-                message=(
+-                    f"Directory workspace has edited chapters: {', '.join(loaded.dirty_chapters)}"
+-                ),
++                message=f"Directory workspace has edited {dirty_label}: {dirty_value}",
+                 origin="workspace",
+             )
+         )
+diff --git a/ssmdconvert/analysis/reporting.py b/ssmdconvert/analysis/reporting.py
+index 7e10faa..c8ccee2 100644
+--- a/ssmdconvert/analysis/reporting.py
++++ b/ssmdconvert/analysis/reporting.py
+@@ -288,6 +288,7 @@ def render_markdown_report(
+ ) -> str:
+     """Render the ordered human-facing ssmdconvert report sections."""
+     stats = report.preparation.stats
++    dirty_label = "Dirty document" if report.source.input_format == "ssmdoc" else "Dirty chapters"
+     unit_contexts = {
+         unit_id: context.id for context in report.contexts for unit_id in context.unit_ids
+     }
+@@ -330,7 +331,7 @@ def render_markdown_report(
+         "",
+         f"- Type: {report.workspace.type}",
+         f"- Status: {report.workspace.status}",
+-        f"- Dirty chapters: {_cell(', '.join(report.workspace.dirty_chapters) or 'none')}",
++        f"- {dirty_label}: {_cell(', '.join(report.workspace.dirty_chapters) or 'none')}",
+         "",
+         "## SSMD semantics",
+         "",
+diff --git a/ssmdconvert/analysis/source.py b/ssmdconvert/analysis/source.py
+index 9499f7a..b9d131d 100644
+--- a/ssmdconvert/analysis/source.py
++++ b/ssmdconvert/analysis/source.py
+@@ -9,8 +9,13 @@ from typing import Any
+ from ssmd import parse_structure
+
+ from ..bundle import load_book_bundle, load_book_workspace
++from ..document_bundle import (
++    load_document_bundle,
++    load_document_workspace,
++    probe_bundle_format,
++)
+ from ..errors import AnalysisSourceError
+-from ..models import Book, BookWorkspace
++from ..models import Book, SsmdDocument
+ from ..render import validate_ssmd_document
+ from .fingerprints import content_fingerprint, sha256_bytes, sha256_file
+ from .models import (
+@@ -79,6 +84,48 @@ def loaded_source_from_book(
+     )
+
+
++def loaded_source_from_document(
++    document: SsmdDocument,
++    *,
++    path: Path,
++    workspace_type: WorkspaceType,
++    workspace_status: WorkspaceStatus,
++    dirty: bool = False,
++    actual_sha256: str | None = None,
++    artifact_sha256: str | None = None,
++) -> LoadedSsmdSource:
++    """Adapt a rendered document to the canonical one-section analysis source."""
++    try:
++        structure = parse_structure(document.ssmd, dialect="0.9", normalize=False)
++    except Exception as exc:
++        raise AnalysisSourceError(f"could not parse document metadata from {path}: {exc}") from exc
++    metadata = dict(structure.header)
++    metadata.pop("ssmd_version", None)
++    document_sha256 = actual_sha256 or sha256_bytes(document.ssmd.encode("utf-8"))
++    section = LoadedSsmdSection(
++        id="document-0001",
++        index=1,
++        title=_title(metadata),
++        level=1,
++        ssmd=_normalize_newlines(document.ssmd),
++        source_number=1,
++        chapter_sha256=document_sha256,
++    )
++    return LoadedSsmdSource(
++        path=path,
++        kind="ssmdoc",
++        input_format="ssmdoc",
++        title=_title(metadata),
++        metadata=metadata,
++        sections=(section,),
++        source_sha256=artifact_sha256 or document.source_sha256,
++        content_fingerprint=content_fingerprint(((section.id, document_sha256),), metadata),
++        workspace_type=workspace_type,
++        workspace_status=workspace_status,
++        dirty_chapters=(section.id,) if dirty else (),
++    )
++
++
+ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
+     """Load and validate a supported SSMD file, bundle, or editable workspace."""
+     requested = Path(source).expanduser()
+@@ -91,20 +138,44 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
+
+     if path.is_dir():
+         try:
+-            workspace: BookWorkspace = load_book_workspace(path)
++            bundle_format = probe_bundle_format(path)
+         except Exception as exc:
+-            raise AnalysisSourceError(f"could not load SSMD book workspace {path}: {exc}") from exc
+-        dirty = tuple(chapter.id for chapter in workspace.chapters if chapter.dirty)
+-        chapter_hashes = {chapter.id: chapter.actual_sha256 for chapter in workspace.chapters}
+-        return loaded_source_from_book(
+-            workspace.book,
+-            path=path,
+-            workspace_type="directory",
+-            workspace_status="dirty" if workspace.dirty else "clean",
+-            dirty_chapters=dirty,
+-            chapter_hashes=chapter_hashes,
+-        )
+-
++            raise AnalysisSourceError(f"could not inspect SSMD workspace {path}: {exc}") from exc
++        if bundle_format == "ssmdconvert.document":
++            try:
++                document_workspace = load_document_workspace(path)
++            except Exception as exc:
++                raise AnalysisSourceError(
++                    f"could not load SSMD document workspace {path}: {exc}"
++                ) from exc
++            return loaded_source_from_document(
++                document_workspace.document,
++                path=path,
++                workspace_type="directory",
++                workspace_status="dirty" if document_workspace.dirty else "clean",
++                dirty=document_workspace.dirty,
++                actual_sha256=document_workspace.status.actual_sha256,
++            )
++        if bundle_format == "ssmdconvert.book":
++            try:
++                book_workspace = load_book_workspace(path)
++            except Exception as exc:
++                raise AnalysisSourceError(
++                    f"could not load SSMD book workspace {path}: {exc}"
++                ) from exc
++            dirty = tuple(chapter.id for chapter in book_workspace.chapters if chapter.dirty)
++            chapter_hashes = {
++                chapter.id: chapter.actual_sha256 for chapter in book_workspace.chapters
++            }
++            return loaded_source_from_book(
++                book_workspace.book,
++                path=path,
++                workspace_type="directory",
++                workspace_status="dirty" if book_workspace.dirty else "clean",
++                dirty_chapters=dirty,
++                chapter_hashes=chapter_hashes,
++            )
++        raise AnalysisSourceError(f"unsupported SSMD workspace format in {path}: {bundle_format!r}")
+     if not path.is_file():
+         raise AnalysisSourceError(
+             f"SSMD source is not a regular file or workspace directory: {path}"
+@@ -124,9 +195,22 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
+             artifact_sha256=sha256_file(path),
+         )
+
++    if lowered_name.endswith((".ssmdoc", ".ssmdoc.zip")):
++        try:
++            document = load_document_bundle(path)
++        except Exception as exc:
++            raise AnalysisSourceError(f"could not load SSMD document bundle {path}: {exc}") from exc
++        return loaded_source_from_document(
++            document,
++            path=path,
++            workspace_type="zip",
++            workspace_status="valid",
++            artifact_sha256=sha256_file(path),
++        )
++
+     if not (lowered_name.endswith(".ssmd") or lowered_name.endswith(".ssmd.md")):
+         raise AnalysisSourceError(
+-            f"unsupported SSMD source {path}; expected .ssmd, .ssmd.md, or .ssmdbook"
++            f"unsupported SSMD source {path}; expected .ssmd, .ssmd.md, .ssmdbook, or .ssmdoc"
+         )
+
+     try:
+diff --git a/ssmdconvert/bundle.py b/ssmdconvert/bundle.py
+index 8f1a47b..d5fbe27 100644
+--- a/ssmdconvert/bundle.py
++++ b/ssmdconvert/bundle.py
+@@ -698,10 +698,31 @@ def load_book_bundle(source: str | Path) -> Book:
+     _invalid(str(path), "bundle is not a regular file or directory")
+
+
+-def read_current_chapter_bytes(source: str | Path, chapter_id: str) -> bytes:
++def read_current_section_bytes(source: str | Path, chapter_id: str) -> bytes:
+     """Read only one chapter's current bytes for affected-chapter freshness checks."""
+     path = Path(source).expanduser().resolve(strict=True)
+     display = str(path)
++    if path.is_dir():
++        from .document_bundle import probe_bundle_format, read_current_document_bytes
++
++        if probe_bundle_format(path) == "ssmdconvert.document":
++            if chapter_id != "document-0001":
++                from .errors import DocumentBundleValidationError
++
++                raise DocumentBundleValidationError(
++                    f"{display}: document {chapter_id!r} is not present in the workspace"
++                )
++            return read_current_document_bytes(path)
++    elif path.is_file() and path.name.lower().endswith((".ssmdoc", ".ssmdoc.zip")):
++        if chapter_id != "document-0001":
++            from .errors import DocumentBundleValidationError
++
++            raise DocumentBundleValidationError(
++                f"{display}: document {chapter_id!r} is not present in the bundle"
++            )
++        from .document_bundle import read_current_document_bytes
++
++        return read_current_document_bytes(path)
+     if path.is_dir():
+         manifest_bytes = _read_directory_file(
+             path,
+@@ -772,6 +793,11 @@ def read_current_chapter_bytes(source: str | Path, chapter_id: str) -> bytes:
+         return data
+
+
++def read_current_chapter_bytes(source: str | Path, chapter_id: str) -> bytes:
++    """Compatibility alias for :func:`read_current_section_bytes`."""
++    return read_current_section_bytes(source, chapter_id)
++
++
+ def validate_book_bundle(source: str | Path) -> None:
+     """Validate a book bundle using the same strict loader as deserialization."""
+     load_book_bundle(source)
+diff --git a/ssmdconvert/cli.py b/ssmdconvert/cli.py
+index 2904db2..a881506 100644
+--- a/ssmdconvert/cli.py
++++ b/ssmdconvert/cli.py
+@@ -47,7 +47,14 @@ from .bundle import (
+ )
+ from .cli_help import AdaptiveTyper, AdaptiveTyperGroup
+ from .converter import Converter
+-from .errors import BookError, SSMDConvertError
++from .document_bundle import (
++    load_document_bundle,
++    load_document_workspace,
++    refresh_document_workspace,
++    validate_document_bundle,
++    write_document_bundle,
++)
++from .errors import BookError, DocumentBundleError, SSMDConvertError
+ from .linguistics import SpacyPolicy
+ from .metadata import load_metadata_file
+ from .options import (
+@@ -59,6 +66,7 @@ from .options import (
+ )
+ from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SpeechSemanticsMode
+ from .progress import ProgressCallback, ProgressEvent
++from .services.document_conversion import convert_document_artifact
+ from .speech.failures import SpeechFreezeFailure
+ from .speech.provenance import build_speech_provenance
+ from .speech.workflows import summarize_changes
+@@ -82,6 +90,14 @@ book_app = AdaptiveTyper(
+     help="Inspect and convert EPUB books.",
+ )
+ app.add_typer(book_app, name="book")
++document_app = AdaptiveTyper(
++    cls=AdaptiveTyperGroup,
++    add_completion=False,
++    no_args_is_help=True,
++    rich_markup_mode=None,
++    help="Convert and manage single-document SSMD workspaces.",
++)
++app.add_typer(document_app, name="document")
+ speech_app = AdaptiveTyper(
+     cls=AdaptiveTyperGroup,
+     add_completion=False,
+@@ -460,6 +476,39 @@ def _book_output_format(
+     )
+
+
++def _default_document_bundle_path(source: Path) -> Path:
++    lower = source.name.lower()
++    if lower.endswith(".ssmd.md"):
++        base = source.name[: -len(".ssmd.md")]
++    elif lower.endswith(".ssmd"):
++        base = source.name[: -len(".ssmd")]
++    else:
++        base = source.stem
++    return source.with_name(f"{base}.ssmdoc")
++
++
++def _document_output_format(
++    destination: Path,
++    requested: str | None,
++) -> Literal["directory", "zip"]:
++    if requested is not None:
++        normalized = requested.lower()
++        if normalized == "directory":
++            return "directory"
++        if normalized == "zip":
++            return "zip"
++        raise typer.BadParameter("--format must be 'directory' or 'zip'")
++    name = destination.name.lower()
++    if name.endswith(".ssmdoc.zip"):
++        return "zip"
++    if name.endswith(".ssmdoc"):
++        return "directory"
++    raise typer.BadParameter(
++        "cannot infer document bundle format from this output name; "
++        "pass --format directory or --format zip"
++    )
++
++
+ def _speech_materialize_to_destination(
+     source: Path,
+     output: Path,
+@@ -492,14 +541,14 @@ def _speech_materialize_to_destination(
+         ),
+         on_progress=on_progress,
+     )
+-    if bundle_format is not None and analysis.source.kind != "ssmdbook":
+-        raise ValueError("--format is only valid when writing an SSMD book bundle")
++    if bundle_format is not None and analysis.source.kind not in {"ssmdbook", "ssmdoc"}:
++        raise ValueError("--format is only valid when writing an SSMD book or document bundle")
+
+-    if analysis.source.kind == "ssmdbook" and source.is_dir():
++    if analysis.source.kind in {"ssmdbook", "ssmdoc"} and source.is_dir():
+         workspace_root = source.resolve(strict=True)
+         if destination.resolve(strict=False).is_relative_to(workspace_root):
+             raise ValueError("bundle output must be outside the source workspace")
+-    from .bundle import read_current_chapter_bytes
++    from .bundle import read_current_section_bytes
+
+     try:
+         frozen = freeze_speech_api(analysis)
+@@ -518,11 +567,11 @@ def _speech_materialize_to_destination(
+         raise
+
+     for section in analysis.sections:
+-        current = _canonical_ssmd_bytes(read_current_chapter_bytes(source, section.id))
++        current = _canonical_ssmd_bytes(read_current_section_bytes(source, section.id))
+         expected = _canonical_ssmd_bytes(section.ssmd.encode("utf-8"))
+         if current != expected:
+             raise ValueError(
+-                f"source chapter {section.id} changed during speech materialization; "
++                f"source section {section.id} changed during speech materialization; "
+                 "no output was written"
+             )
+
+@@ -534,6 +583,36 @@ def _speech_materialize_to_destination(
+             source=source,
+             force=force,
+         )
++    elif analysis.source.kind == "ssmdoc":
++        if source.is_dir():
++            document = load_document_workspace(source).document
++        else:
++            document = load_document_bundle(source)
++        if len(analysis.sections) != 1 or analysis.sections[0].id != "document-0001":
++            raise ValueError("SSMD document analysis did not contain document-0001")
++        section = analysis.sections[0]
++        current_document = _canonical_ssmd_bytes(document.ssmd.encode("utf-8"))
++        expected_document = _canonical_ssmd_bytes(section.ssmd.encode("utf-8"))
++        if current_document != expected_document:
++            raise ValueError(
++                "source document changed during speech materialization; no output was written"
++            )
++        updated_document = replace(
++            document,
++            ssmd=frozen.sections.get(section.id, document.ssmd),
++            metadata=analysis.source.metadata,
++            speech_semantics=build_speech_provenance(
++                analysis,
++                source_sha256=document.source_sha256,
++            ),
++        )
++        selected_format = _document_output_format(destination, bundle_format)
++        write_document_bundle(
++            updated_document,
++            destination,
++            format=selected_format,
++            overwrite=force,
++        )
+     else:
+         if source.is_dir():
+             book = load_book_workspace(source).book
+@@ -587,9 +666,10 @@ def _speech_materialize_to_destination(
+         if json_output:
+             failed_outputs.append("freeze report could not be written to stdout")
+         requested = " and ".join(failed_outputs) or "requested report output failed"
+-        raise BookError(
+-            f"SSMD speech artifact was published at {destination}, but {requested}: {exc}"
+-        ) from exc
++        message = f"SSMD speech artifact was published at {destination}, but {requested}: {exc}"
++        if analysis.source.kind == "ssmdoc":
++            raise DocumentBundleError(message) from exc
++        raise BookError(message) from exc
+     return destination, report
+
+
+@@ -1397,3 +1477,191 @@ def book_validate(
+         typer.echo(f"Valid book bundle: {bundle}")
+
+     _run_with_domain_errors(run)
++
++
++@document_app.command("convert")  # type: ignore[untyped-decorator]
++def document_convert(
++    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
++    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
++    metadata_file: Annotated[
++        Path | None,
++        typer.Option("--metadata-file", help="YAML file with structured metadata overrides."),
++    ] = None,
++    title: Annotated[str | None, typer.Option("--title")] = None,
++    author: Annotated[str | None, typer.Option("--author")] = None,
++    language: Annotated[str | None, typer.Option("-l", "--language")] = None,
++    sequence_fallback_mode: Annotated[
++        SequenceFallbackModeOption | None,
++        typer.Option("--sequence-fallback-mode"),
++    ] = None,
++    bundle_format: Annotated[str | None, typer.Option("--format")] = None,
++    force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
++) -> None:
++    """Convert a supported source into an editable single-document SSMD workspace."""
++
++    def run() -> None:
++        destination = output or _default_document_bundle_path(source)
++        resolved_destination = _output_path(destination)
++        _reject_input_overwrite(source, resolved_destination)
++        selected_format = _document_output_format(destination, bundle_format)
++        metadata_overrides = (
++            load_metadata_file(metadata_file) if metadata_file is not None else None
++        )
++        document = convert_document_artifact(
++            source,
++            title=title,
++            author=author,
++            language=language,
++            metadata_overrides=metadata_overrides,
++            sequence_fallback_mode=(
++                sequence_fallback_mode.value if sequence_fallback_mode is not None else None
++            ),
++        )
++        written = write_document_bundle(
++            document,
++            destination,
++            format=selected_format,
++            overwrite=force,
++        )
++        typer.echo(f"Created SSMD document bundle: {written}")
++
++    _run_with_domain_errors(run)
++
++
++@document_app.command("inspect")  # type: ignore[untyped-decorator]
++def document_inspect(
++    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
++    json_output: Annotated[bool, typer.Option("--json")] = False,
++) -> None:
++    """Inspect a supported source document before conversion."""
++
++    def run() -> None:
++        converter = Converter()
++        adapter = converter.adapter_for(source)
++        document = inspect_document(source)
++        payload = {
++            "source": str(source),
++            "adapter": adapter.name,
++            "metadata": dict(document.metadata),
++            "sections": [
++                {
++                    "id": section.id,
++                    "title": section.title,
++                    "chars": len(section.markdown),
++                    "source_ref": section.source_ref,
++                }
++                for section in document.sections
++            ],
++        }
++        if json_output:
++            typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
++            return
++        typer.echo(f"Adapter: {adapter.name}")
++        typer.echo(f"Sections: {len(document.sections)}")
++        for section in document.sections:
++            typer.echo(
++                f"  {section.id}: {section.title or '(untitled)'} ({len(section.markdown)} chars)"
++            )
++
++    _run_with_domain_errors(run)
++
++
++@document_app.command("metadata")  # type: ignore[untyped-decorator]
++def document_metadata(
++    bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
++    json_output: Annotated[bool, typer.Option("--json")] = False,
++) -> None:
++    """Display metadata from a document workspace or ZIP bundle."""
++
++    def run() -> None:
++        if bundle.is_dir():
++            workspace = load_document_workspace(bundle)
++            document = workspace.document
++            workspace_lines = [
++                "Workspace: directory",
++                f"Status: {'dirty' if workspace.dirty else 'clean'}",
++                f"Dirty document: {int(workspace.dirty)}",
++            ]
++        else:
++            document = load_document_bundle(bundle)
++            workspace_lines = ["Workspace: no", "Status: valid"]
++        if json_output:
++            typer.echo(
++                json.dumps(
++                    {"metadata": dict(document.metadata)},
++                    ensure_ascii=False,
++                    indent=2,
++                    sort_keys=True,
++                    allow_nan=False,
++                )
++            )
++            return
++        typer.echo("\n".join(workspace_lines) + "\n\n" + _render_stored_metadata(document.metadata))
++
++    _run_with_domain_errors(run)
++
++
++@document_app.command("refresh")  # type: ignore[untyped-decorator]
++def document_refresh(
++    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
++    check: Annotated[bool, typer.Option("--check")] = False,
++) -> None:
++    """Refresh a document workspace manifest, or check whether it is clean."""
++
++    def run() -> None:
++        if check:
++            current = load_document_workspace(workspace)
++            if current.dirty:
++                typer.echo(f"Workspace dirty: {workspace}", err=True)
++                typer.echo("Dirty document: 1", err=True)
++                raise typer.Exit(code=1)
++            typer.echo(f"Workspace clean: {workspace}")
++            return
++        current = load_document_workspace(workspace)
++        changed_digest = int(current.dirty)
++        refresh_document_workspace(workspace)
++        typer.echo(f"Refreshed {workspace}")
++        typer.echo(f"Changed digest: {changed_digest}")
++        typer.echo("Status: clean")
++
++    _run_with_domain_errors(run)
++
++
++@document_app.command("pack")  # type: ignore[untyped-decorator]
++def document_pack(
++    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
++    output: Annotated[Path, typer.Option("--output", "-o")],
++    force: Annotated[bool, typer.Option("--force", help="Replace an existing ZIP bundle.")] = False,
++) -> None:
++    """Pack current valid workspace content into a strict portable ZIP."""
++
++    def run() -> None:
++        current = load_document_workspace(workspace)
++        destination = _output_path(output)
++        _reject_input_overwrite(workspace, destination)
++        written = write_document_bundle(
++            current.document,
++            destination,
++            format="zip",
++            overwrite=force,
++        )
++        typer.echo(f"Packed SSMD document ZIP: {written}")
++
++    _run_with_domain_errors(run)
++
++
++@document_app.command("validate")  # type: ignore[untyped-decorator]
++def document_validate(
++    bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
++    json_output: Annotated[bool, typer.Option("--json")] = False,
++) -> None:
++    """Validate a directory or ZIP SSMD document bundle."""
++
++    def run() -> None:
++        validate_document_bundle(bundle)
++        if json_output:
++            typer.echo(json.dumps({"valid": True, "bundle": str(bundle)}, ensure_ascii=False))
++            return
++        typer.echo(f"Valid document bundle: {bundle}")
++
++    _run_with_domain_errors(run)
+diff --git a/ssmdconvert/document_bundle.py b/ssmdconvert/document_bundle.py
+new file mode 100644
+index 0000000..f105235
+--- /dev/null
++++ b/ssmdconvert/document_bundle.py
+@@ -0,0 +1,718 @@
++"""Secure serialization and editable-workspace lifecycle for single SSMD documents."""
++
++from __future__ import annotations
++
++import errno
++import hashlib
++import json
++import math
++import os
++import re
++import shutil
++import stat
++import tempfile
++import zipfile
++import zlib
++from collections.abc import Callable, Mapping
++from pathlib import Path, PurePosixPath
++from typing import Any, Literal, NoReturn, TypeGuard
++
++from .errors import DocumentBundleError, DocumentBundleValidationError
++from .models import (
++    DocumentWorkspace,
++    SourceInfo,
++    SsmdDocument,
++    WorkspaceDocumentStatus,
++)
++from .render import validate_ssmd_document
++
++_DOCUMENT_FORMAT = "ssmdconvert.document"
++_DOCUMENT_SCHEMA_VERSION = 1
++_SSMD_VERSION = "0.9"
++_DOCUMENT_ID = "document-0001"
++_DOCUMENT_PATH = "document.ssmd.md"
++_SHA256 = re.compile(r"^[0-9a-f]{64}$")
++_WINDOWS_DRIVE = re.compile(r"[A-Za-z]:")
++_FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
++_MAX_MANIFEST_BYTES = 2 * 1024 * 1024
++_MAX_DOCUMENT_BYTES = 64 * 1024 * 1024
++_MAX_ARCHIVE_MEMBERS = 10_000
++
++
++def _invalid(display: str, message: str) -> NoReturn:
++    raise DocumentBundleValidationError(f"{display}: {message}")
++
++
++def _is_integer(value: Any) -> TypeGuard[int]:
++    return isinstance(value, int) and not isinstance(value, bool)
++
++
++def _is_sha256(value: Any) -> bool:
++    return isinstance(value, str) and _SHA256.fullmatch(value) is not None
++
++
++def _sha256(data: bytes) -> str:
++    return hashlib.sha256(data).hexdigest()
++
++
++def _validate_relative_path(value: Any, display: str, *, allow_directory: bool = False) -> str:
++    if not isinstance(value, str) or not value or "\x00" in value:
++        _invalid(display, f"invalid bundle path: {value!r}")
++    if "\\" in value or value.startswith("/") or _WINDOWS_DRIVE.match(value):
++        _invalid(display, f"bundle path must be relative and POSIX-normalized: {value!r}")
++    normalized = value[:-1] if allow_directory and value.endswith("/") else value
++    path = PurePosixPath(normalized)
++    if (
++        not normalized
++        or path.is_absolute()
++        or path.as_posix() != normalized
++        or any(part in {".", ".."} for part in path.parts)
++    ):
++        _invalid(display, f"bundle path must be relative and normalized: {value!r}")
++    return normalized
++
++
++def _validate_source_name(value: Any, display: str) -> str:
++    if (
++        not isinstance(value, str)
++        or not value
++        or value in {".", ".."}
++        or "\x00" in value
++        or "/" in value
++        or "\\" in value
++        or _WINDOWS_DRIVE.match(value)
++    ):
++        _invalid(display, f"source name must be a portable filename: {value!r}")
++    return value
++
++
++def _json_value(value: Any, display: str) -> Any:
++    if value is None or isinstance(value, (str, bool, int)):
++        return value
++    if isinstance(value, float):
++        if not math.isfinite(value):
++            _invalid(display, "metadata must not contain NaN or Infinity")
++        return value
++    if isinstance(value, Mapping):
++        result: dict[str, Any] = {}
++        for key, item in value.items():
++            if not isinstance(key, str):
++                _invalid(display, "metadata object keys must be strings")
++            result[key] = _json_value(item, display)
++        return result
++    if isinstance(value, (list, tuple)):
++        return [_json_value(item, display) for item in value]
++    _invalid(display, f"metadata contains a non-JSON value: {type(value).__name__}")
++
++
++def _validate_speech_semantics(value: Any, display: str) -> None:
++    if not isinstance(value, dict):
++        _invalid(display, "manifest speech_semantics must be a JSON object")
++    status = value.get("status")
++    if status not in {"complete", "preserved"}:
++        _invalid(display, f"unsupported speech_semantics status: {status!r}")
++    if value.get("owner") != "ssmdconvert":
++        _invalid(display, "manifest speech_semantics owner must be 'ssmdconvert'")
++    if not _is_sha256(value.get("source_sha256")):
++        _invalid(
++            display, "manifest speech_semantics source_sha256 must be a lowercase SHA256 digest"
++        )
++    if status == "complete":
++        if value.get("engine") != "ttsready":
++            _invalid(display, "complete speech_semantics engine must be 'ttsready'")
++        for key in (
++            "ttsready_version",
++            "spokenform_version",
++            "profile_fingerprint",
++            "override_fingerprint",
++            "runtime_fingerprint",
++            "prepared_fingerprint",
++        ):
++            item = value.get(key)
++            if not isinstance(item, str) or not item:
++                _invalid(display, f"complete speech_semantics {key} must be a non-empty string")
++        for key in (
++            "profile_fingerprint",
++            "override_fingerprint",
++            "runtime_fingerprint",
++            "prepared_fingerprint",
++        ):
++            if not _is_sha256(value.get(key)):
++                _invalid(
++                    display, f"complete speech_semantics {key} must be a lowercase SHA256 digest"
++                )
++
++
++def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
++    if not isinstance(value, dict):
++        _invalid(display, "manifest root must be a JSON object")
++    if value.get("format") != _DOCUMENT_FORMAT:
++        _invalid(display, f"unsupported bundle format: {value.get('format')!r}")
++    if (
++        not _is_integer(value.get("schema_version"))
++        or value["schema_version"] != _DOCUMENT_SCHEMA_VERSION
++    ):
++        _invalid(display, f"unsupported schema version: {value.get('schema_version')!r}")
++    if value.get("ssmd_version") != _SSMD_VERSION:
++        _invalid(display, f"unsupported SSMD version: {value.get('ssmd_version')!r}")
++    metadata = value.get("metadata")
++    if not isinstance(metadata, dict):
++        _invalid(display, "manifest metadata must be a JSON object")
++    if "ssmd_version" in metadata:
++        _invalid(display, "manifest metadata must not contain reserved ssmd_version")
++    _json_value(metadata, display)
++
++    source = value.get("source")
++    if not isinstance(source, dict):
++        _invalid(display, "manifest source must be a JSON object")
++    if not isinstance(source.get("format"), str) or not source["format"]:
++        _invalid(display, "source format must be a non-empty string")
++    if "media_type" not in source:
++        _invalid(display, "source media_type is required")
++    if source["media_type"] is not None and not isinstance(source["media_type"], str):
++        _invalid(display, "source media_type must be a string or null")
++    _validate_source_name(source.get("name"), display)
++    if not _is_sha256(source.get("sha256")):
++        _invalid(display, "source sha256 must be a lowercase SHA256 digest")
++
++    document = value.get("document")
++    if not isinstance(document, dict):
++        _invalid(display, "manifest document must be a JSON object")
++    if document.get("id") != _DOCUMENT_ID:
++        _invalid(display, f"document id must be {_DOCUMENT_ID!r}")
++    if document.get("path") != _DOCUMENT_PATH:
++        _invalid(display, f"document path must be {_DOCUMENT_PATH!r}")
++    _validate_relative_path(document.get("path"), display)
++    char_count = document.get("char_count")
++    if not _is_integer(char_count) or char_count < 0:
++        _invalid(display, "document char_count must be a non-negative integer")
++    if not _is_sha256(document.get("sha256")):
++        _invalid(display, "document sha256 must be a lowercase SHA256 digest")
++    if "speech_semantics" in value:
++        _validate_speech_semantics(value["speech_semantics"], display)
++        if value["speech_semantics"]["source_sha256"] != source["sha256"]:
++            _invalid(
++                display, "manifest speech_semantics source_sha256 does not match source sha256"
++            )
++    return value
++
++
++def _reject_json_constant(value: str) -> NoReturn:
++    raise ValueError(f"non-standard JSON constant {value}")
++
++
++def _parse_manifest(raw: bytes, display: str) -> dict[str, Any]:
++    try:
++        value = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
++    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
++        _invalid(display, f"manifest is not valid UTF-8 JSON: {exc}")
++    return _validate_manifest(value, display)
++
++
++def _manifest_for_document(document: SsmdDocument) -> tuple[bytes, bytes]:
++    if not isinstance(document, SsmdDocument):
++        raise DocumentBundleError("write_document_bundle requires an SsmdDocument")
++    if not isinstance(document.ssmd, str):
++        raise DocumentBundleValidationError("document SSMD must be text")
++    try:
++        validate_ssmd_document(document.ssmd)
++        document_bytes = document.ssmd.encode("utf-8", errors="strict")
++    except Exception as exc:
++        raise DocumentBundleValidationError(
++            f"document does not contain valid UTF-8 SSMD 0.9: {exc}"
++        ) from exc
++    if len(document_bytes) > _MAX_DOCUMENT_BYTES:
++        raise DocumentBundleValidationError("document exceeds the 64 MiB size limit")
++    source_name = document.source.name
++    if source_name is None and document.source.path is not None:
++        source_name = document.source.path.name
++    display = "document bundle"
++    _validate_source_name(source_name, display)
++    if not _is_sha256(document.source_sha256):
++        raise DocumentBundleValidationError("document source SHA-256 is missing or invalid")
++    metadata = _json_value(document.metadata, display)
++    if not isinstance(metadata, dict):
++        raise DocumentBundleValidationError("document metadata must be a mapping")
++    metadata.pop("ssmd_version", None)
++    speech_semantics = None
++    if document.speech_semantics is not None:
++        speech_semantics = _json_value(document.speech_semantics, display)
++        _validate_speech_semantics(speech_semantics, display)
++        if speech_semantics.get("source_sha256") != document.source_sha256:
++            raise DocumentBundleValidationError(
++                "document speech_semantics source_sha256 does not match source sha256"
++            )
++    manifest: dict[str, Any] = {
++        "format": _DOCUMENT_FORMAT,
++        "schema_version": _DOCUMENT_SCHEMA_VERSION,
++        "ssmd_version": _SSMD_VERSION,
++        "metadata": metadata,
++        "source": {
++            "format": document.source.format,
++            "media_type": document.source.media_type,
++            "name": source_name,
++            "sha256": document.source_sha256,
++        },
++        "document": {
++            "id": _DOCUMENT_ID,
++            "path": _DOCUMENT_PATH,
++            "char_count": len(document.ssmd),
++            "sha256": _sha256(document_bytes),
++        },
++    }
++    if not isinstance(document.source.format, str) or not document.source.format:
++        raise DocumentBundleValidationError("document source format must be a non-empty string")
++    if document.source.media_type is not None and not isinstance(document.source.media_type, str):
++        raise DocumentBundleValidationError("document source media_type must be a string or None")
++    if speech_semantics is not None:
++        manifest["speech_semantics"] = speech_semantics
++    _validate_manifest(manifest, "document bundle")
++    try:
++        raw_manifest = json.dumps(
++            manifest,
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++            allow_nan=False,
++        ).encode("utf-8")
++    except (TypeError, ValueError, UnicodeEncodeError) as exc:
++        raise DocumentBundleValidationError(
++            f"could not serialize document manifest: {exc}"
++        ) from exc
++    if len(raw_manifest) > _MAX_MANIFEST_BYTES:
++        raise DocumentBundleValidationError("document manifest exceeds the 2 MiB size limit")
++    return raw_manifest, document_bytes
++
++
++def _is_below(path: Path, root: Path) -> bool:
++    try:
++        path.relative_to(root)
++    except ValueError:
++        return False
++    return True
++
++
++def _read_directory_file(root: Path, name: str, display: str, *, max_bytes: int) -> bytes:
++    normalized = _validate_relative_path(name, display)
++    target = root.joinpath(*PurePosixPath(normalized).parts)
++    try:
++        resolved = target.resolve(strict=True)
++    except (OSError, RuntimeError) as exc:
++        _invalid(display, f"missing or unresolvable bundle file {name!r}: {exc}")
++    if not _is_below(resolved, root):
++        _invalid(display, f"bundle file resolves outside the bundle directory: {name!r}")
++    if not resolved.is_file():
++        _invalid(display, f"bundle entry is not a regular file: {name!r}")
++    try:
++        if resolved.stat().st_size > max_bytes:
++            _invalid(display, f"bundle file {name!r} exceeds the size limit ({max_bytes} bytes)")
++        data = resolved.read_bytes()
++    except OSError as exc:
++        _invalid(display, f"could not read bundle file {name!r}: {exc}")
++    if len(data) > max_bytes:
++        _invalid(display, f"bundle file {name!r} exceeds the size limit ({max_bytes} bytes)")
++    return data
++
++
++def _document_from_manifest(
++    manifest: dict[str, Any],
++    read_bytes: Callable[[str], bytes],
++    display: str,
++    *,
++    verify_sha256: bool = True,
++    statuses: list[WorkspaceDocumentStatus] | None = None,
++) -> SsmdDocument:
++    entry = manifest["document"]
++    raw = read_bytes(entry["path"])
++    actual_sha256 = _sha256(raw)
++    dirty = actual_sha256 != entry["sha256"]
++    if verify_sha256 and dirty:
++        _invalid(display, f"SHA256 mismatch for document {entry['path']!r}")
++    try:
++        text = raw.decode("utf-8", errors="strict")
++    except UnicodeDecodeError as exc:
++        _invalid(display, f"document {entry['path']!r} is not UTF-8: {exc}")
++    try:
++        validate_ssmd_document(text)
++    except Exception as exc:
++        _invalid(display, f"document {entry['path']!r} is not valid SSMD 0.9: {exc}")
++    if len(text) != entry["char_count"] and verify_sha256:
++        _invalid(display, f"document {entry['path']!r} character count does not match manifest")
++    if statuses is not None:
++        statuses.append(
++            WorkspaceDocumentStatus(
++                id=entry["id"],
++                path=entry["path"],
++                expected_sha256=entry["sha256"],
++                actual_sha256=actual_sha256,
++                dirty=dirty,
++            )
++        )
++    source = manifest["source"]
++    return SsmdDocument(
++        source=SourceInfo(
++            format=source["format"],
++            media_type=source["media_type"],
++            name=source["name"],
++        ),
++        metadata=dict(manifest["metadata"]),
++        ssmd=text,
++        source_sha256=source["sha256"],
++        speech_semantics=(
++            dict(manifest["speech_semantics"]) if "speech_semantics" in manifest else None
++        ),
++    )
++
++
++def _read_directory_bundle(
++    source: Path, *, workspace: bool = False
++) -> SsmdDocument | DocumentWorkspace:
++    display = str(source)
++    try:
++        root = source.resolve(strict=True)
++    except (OSError, RuntimeError) as exc:
++        _invalid(display, f"could not resolve bundle directory: {exc}")
++    if not root.is_dir():
++        _invalid(display, "bundle source is not a directory")
++    manifest_bytes = _read_directory_file(
++        root, "manifest.json", display, max_bytes=_MAX_MANIFEST_BYTES
++    )
++    manifest = _parse_manifest(manifest_bytes, display)
++    statuses: list[WorkspaceDocumentStatus] | None = [] if workspace else None
++    document = _document_from_manifest(
++        manifest,
++        lambda name: _read_directory_file(root, name, display, max_bytes=_MAX_DOCUMENT_BYTES),
++        display,
++        verify_sha256=not workspace,
++        statuses=statuses,
++    )
++    if not workspace:
++        return document
++    assert statuses is not None
++    status = statuses[0]
++    return DocumentWorkspace(
++        path=root,
++        document=document,
++        status=status,
++        dirty=status.dirty,
++    )
++
++
++def _validate_zip_member(info: zipfile.ZipInfo, display: str) -> None:
++    _validate_relative_path(info.filename, display, allow_directory=info.is_dir())
++    mode = (info.external_attr >> 16) & 0xFFFF
++    if stat.S_ISLNK(mode):
++        _invalid(display, f"ZIP symlink entries are not allowed: {info.filename!r}")
++
++
++def _read_zip_bundle(source: Path) -> SsmdDocument:
++    display = str(source)
++    try:
++        archive = zipfile.ZipFile(source, "r")
++    except (OSError, zipfile.BadZipFile) as exc:
++        _invalid(display, f"not a readable document ZIP: {exc}")
++    with archive:
++        infos = archive.infolist()
++        if len(infos) > _MAX_ARCHIVE_MEMBERS:
++            _invalid(display, "ZIP contains too many archive members")
++        names = [info.filename for info in infos]
++        if len(names) != len(set(names)):
++            _invalid(display, "ZIP contains duplicate member names")
++        for info in infos:
++            _validate_zip_member(info, display)
++        members = {info.filename: info for info in infos}
++        manifest_info = members.get("manifest.json")
++        if manifest_info is None or manifest_info.is_dir():
++            _invalid(display, "ZIP is missing manifest.json")
++        if manifest_info.file_size > _MAX_MANIFEST_BYTES:
++            _invalid(display, "ZIP manifest.json exceeds the size limit")
++        try:
++            manifest_bytes = archive.read(manifest_info)
++        except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
++            _invalid(display, f"could not read ZIP manifest.json: {exc}")
++        if len(manifest_bytes) > _MAX_MANIFEST_BYTES:
++            _invalid(display, "ZIP manifest.json exceeds the size limit")
++        manifest = _parse_manifest(manifest_bytes, display)
++
++        def read_member(name: str) -> bytes:
++            info = members.get(name)
++            if info is None or info.is_dir():
++                _invalid(display, f"ZIP is missing document file {name!r}")
++            if info.file_size > _MAX_DOCUMENT_BYTES:
++                _invalid(display, f"ZIP document {name!r} exceeds the 64 MiB size limit")
++            try:
++                data = archive.read(info)
++            except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
++                _invalid(display, f"could not read ZIP document {name!r}: {exc}")
++            if len(data) > _MAX_DOCUMENT_BYTES:
++                _invalid(display, f"ZIP document {name!r} exceeds the 64 MiB size limit")
++            return data
++
++        return _document_from_manifest(manifest, read_member, display)
++
++
++def _write_zip(target: Path, manifest: bytes, document: bytes) -> None:
++    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
++        for name, data in (("manifest.json", manifest), (_DOCUMENT_PATH, document)):
++            info = zipfile.ZipInfo(name, _FIXED_ZIP_TIME)
++            info.create_system = 3
++            info.external_attr = (stat.S_IFREG | 0o644) << 16
++            info.compress_type = zipfile.ZIP_DEFLATED
++            archive.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
++
++
++def _write_directory(target: Path, manifest: bytes, document: bytes) -> None:
++    root = target.resolve()
++    for name, data in (("manifest.json", manifest), (_DOCUMENT_PATH, document)):
++        normalized = _validate_relative_path(name, str(target))
++        destination = root.joinpath(*PurePosixPath(normalized).parts)
++        if not _is_below(destination.resolve(strict=False), root):
++            raise DocumentBundleError(f"bundle output path escapes the directory: {name!r}")
++        destination.parent.mkdir(parents=True, exist_ok=True)
++        if not _is_below(destination.resolve(strict=False), root):
++            raise DocumentBundleError(f"bundle output path escapes the directory: {name!r}")
++        destination.write_bytes(data)
++
++
++def _destination_exists(target: Path) -> bool:
++    return target.exists() or target.is_symlink()
++
++
++def _publish_path_no_replace(source: Path, target: Path) -> None:
++    link = getattr(os, "link", None)
++    if link is not None:
++        try:
++            link(source, target)
++            return
++        except OSError as exc:
++            unsupported = {
++                errno.EPERM,
++                errno.EXDEV,
++                getattr(errno, "EOPNOTSUPP", -1),
++                getattr(errno, "ENOTSUP", -1),
++                getattr(errno, "ENOSYS", -1),
++            }
++            if exc.errno not in unsupported:
++                raise
++    fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
++    reservation = os.fstat(fd)
++    os.close(fd)
++    try:
++        os.replace(source, target)
++    except OSError:
++        try:
++            current = target.stat()
++            if (current.st_dev, current.st_ino) == (reservation.st_dev, reservation.st_ino):
++                target.unlink()
++        except FileNotFoundError:
++            pass
++        raise
++
++
++def _write_zip_atomic(target: Path, manifest: bytes, document: bytes, *, overwrite: bool) -> None:
++    target.parent.mkdir(parents=True, exist_ok=True)
++    if target.is_symlink() or (target.exists() and target.is_dir()):
++        raise DocumentBundleError(f"ZIP bundle output must be a regular file: {target}")
++    if _destination_exists(target) and not overwrite:
++        raise DocumentBundleError(f"bundle output already exists: {target}")
++    fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.tmp-", dir=target.parent)
++    os.close(fd)
++    temporary = Path(temporary_name)
++    try:
++        _write_zip(temporary, manifest, document)
++        os.chmod(temporary, 0o644)
++        _read_zip_bundle(temporary)
++        if overwrite:
++            os.replace(temporary, target)
++        else:
++            try:
++                _publish_path_no_replace(temporary, target)
++            except FileExistsError as exc:
++                raise DocumentBundleError(f"bundle output already exists: {target}") from exc
++            temporary.unlink(missing_ok=True)
++    finally:
++        temporary.unlink(missing_ok=True)
++
++
++def _new_backup_path(target: Path) -> Path:
++    backup = Path(tempfile.mkdtemp(prefix=f".{target.name}.backup-", dir=target.parent))
++    backup.rmdir()
++    return backup
++
++
++def _write_directory_atomic(
++    target: Path,
++    manifest: bytes,
++    document: bytes,
++    *,
++    overwrite: bool,
++) -> None:
++    target.parent.mkdir(parents=True, exist_ok=True)
++    if target.is_symlink() or (target.exists() and not target.is_dir()):
++        raise DocumentBundleError(f"directory bundle output must be a directory: {target}")
++    if _destination_exists(target) and not overwrite:
++        raise DocumentBundleError(f"bundle output already exists: {target}")
++    temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
++    backup: Path | None = None
++    try:
++        _write_directory(temporary, manifest, document)
++        _read_directory_bundle(temporary)
++        if _destination_exists(target):
++            if not overwrite:
++                raise DocumentBundleError(f"bundle output already exists: {target}")
++            if target.is_symlink() or not target.is_dir():
++                raise DocumentBundleError(f"directory bundle output must be a directory: {target}")
++            backup = _new_backup_path(target)
++            os.replace(target, backup)
++        try:
++            os.replace(temporary, target)
++        except OSError:
++            if backup is not None:
++                os.replace(backup, target)
++                backup = None
++            raise
++        if backup is not None:
++            shutil.rmtree(backup)
++            backup = None
++    finally:
++        if temporary.exists():
++            shutil.rmtree(temporary)
++
++
++def write_document_bundle(
++    document: SsmdDocument,
++    output: str | Path,
++    *,
++    format: Literal["directory", "zip"],
++    overwrite: bool = False,
++) -> Path:
++    """Atomically write a strict single-document directory or ZIP bundle."""
++    if format not in ("directory", "zip"):
++        raise DocumentBundleError("bundle format must be 'directory' or 'zip'")
++    manifest, document_bytes = _manifest_for_document(document)
++    raw_target = Path(os.path.abspath(Path(output).expanduser()))
++    target = raw_target.parent.resolve() / raw_target.name
++    try:
++        if format == "zip":
++            _write_zip_atomic(target, manifest, document_bytes, overwrite=overwrite)
++        else:
++            _write_directory_atomic(target, manifest, document_bytes, overwrite=overwrite)
++    except DocumentBundleError:
++        raise
++    except OSError as exc:
++        raise DocumentBundleError(f"could not write document bundle {target}: {exc}") from exc
++    return target
++
++
++def load_document_bundle(source: str | Path) -> SsmdDocument:
++    """Load and strictly validate a document directory or ZIP bundle."""
++    path = Path(source).expanduser()
++    if not path.exists():
++        _invalid(str(path), "bundle does not exist")
++    if path.is_dir():
++        result = _read_directory_bundle(path)
++        assert isinstance(result, SsmdDocument)
++        return result
++    if path.is_file():
++        return _read_zip_bundle(path)
++    _invalid(str(path), "bundle is not a regular file or directory")
++
++
++def validate_document_bundle(source: str | Path) -> None:
++    """Validate a document bundle using the same strict loader as deserialization."""
++    load_document_bundle(source)
++
++
++def load_document_workspace(path: str | Path) -> DocumentWorkspace:
++    """Load current valid document text while reporting stale digest as editable state."""
++    source = Path(path).expanduser()
++    if not source.is_dir():
++        _invalid(str(source), "document workspace must be a directory")
++    result = _read_directory_bundle(source, workspace=True)
++    assert isinstance(result, DocumentWorkspace)
++    return result
++
++
++def refresh_document_workspace(path: str | Path) -> DocumentWorkspace:
++    """Refresh the manifest digest and character count for a valid edited document."""
++    workspace = load_document_workspace(path)
++    manifest_path = workspace.path / "manifest.json"
++    try:
++        manifest = _parse_manifest(
++            _read_directory_file(
++                workspace.path,
++                "manifest.json",
++                str(workspace.path),
++                max_bytes=_MAX_MANIFEST_BYTES,
++            ),
++            str(workspace.path),
++        )
++        manifest["document"]["sha256"] = workspace.status.actual_sha256
++        manifest["document"]["char_count"] = len(workspace.document.ssmd)
++        _validate_manifest(manifest, str(workspace.path))
++        raw = json.dumps(
++            manifest,
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++            allow_nan=False,
++        ).encode("utf-8")
++        if len(raw) > _MAX_MANIFEST_BYTES:
++            raise DocumentBundleValidationError("document manifest exceeds the 2 MiB size limit")
++        mode = stat.S_IMODE(manifest_path.stat().st_mode)
++        fd, temporary_name = tempfile.mkstemp(prefix=".manifest.json.tmp-", dir=workspace.path)
++        temporary = Path(temporary_name)
++        try:
++            with os.fdopen(fd, "wb") as stream:
++                stream.write(raw)
++                stream.flush()
++                os.fsync(stream.fileno())
++            os.chmod(temporary, mode)
++            os.replace(temporary, manifest_path)
++        finally:
++            temporary.unlink(missing_ok=True)
++    except DocumentBundleError:
++        raise
++    except (OSError, TypeError, ValueError, UnicodeEncodeError) as exc:
++        raise DocumentBundleError(
++            f"could not refresh workspace manifest {manifest_path}: {exc}"
++        ) from exc
++    validate_document_bundle(workspace.path)
++    return load_document_workspace(workspace.path)
++
++
++def read_current_document_bytes(source: str | Path) -> bytes:
++    """Read current document bytes from a workspace, bundle, or standalone SSMD file."""
++    path = Path(source).expanduser()
++    if path.is_dir():
++        workspace = load_document_workspace(path)
++        return workspace.document.ssmd.encode("utf-8")
++    if not path.is_file():
++        _invalid(str(path), "source is not a regular file or workspace directory")
++    if path.name.lower().endswith((".ssmdoc", ".ssmdoc.zip")):
++        return load_document_bundle(path).ssmd.encode("utf-8")
++    try:
++        if path.stat().st_size > _MAX_DOCUMENT_BYTES:
++            _invalid(str(path), "SSMD document exceeds the size limit")
++        return path.read_bytes()
++    except OSError as exc:
++        _invalid(str(path), f"could not read SSMD document: {exc}")
++
++
++def probe_bundle_format(path: str | Path) -> str:
++    """Safely inspect the format tag in a bounded directory manifest."""
++    source = Path(path).expanduser()
++    if not source.is_dir():
++        raise DocumentBundleValidationError(f"{source}: format probe requires a directory")
++    try:
++        root = source.resolve(strict=True)
++    except (OSError, RuntimeError) as exc:
++        _invalid(str(source), f"could not resolve bundle directory: {exc}")
++    raw = _read_directory_file(root, "manifest.json", str(source), max_bytes=_MAX_MANIFEST_BYTES)
++    try:
++        parsed = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
++    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
++        _invalid(str(source), f"manifest is not valid UTF-8 JSON: {exc}")
++    if not isinstance(parsed, dict) or not isinstance(parsed.get("format"), str):
++        _invalid(str(source), "manifest format field must be a string")
++    return parsed["format"]
+diff --git a/ssmdconvert/errors.py b/ssmdconvert/errors.py
+index 3dd99e3..125b591 100644
+--- a/ssmdconvert/errors.py
++++ b/ssmdconvert/errors.py
+@@ -26,6 +26,14 @@ class BookBundleValidationError(BookBundleError):
+     """A book bundle has invalid structure or content."""
+
+
++class DocumentBundleError(SSMDConvertError):
++    """A document bundle could not be read or written."""
++
++
++class DocumentBundleValidationError(DocumentBundleError):
++    """A document bundle has invalid structure or content."""
++
++
+ class MissingDependencyError(SSMDConvertError):
+     """An optional adapter/enricher dependency is not installed."""
+
+diff --git a/ssmdconvert/models.py b/ssmdconvert/models.py
+index 1495a91..fd2c2fd 100644
+--- a/ssmdconvert/models.py
++++ b/ssmdconvert/models.py
+@@ -96,6 +96,38 @@ class BookWorkspace:
+     dirty: bool
+
+
++@dataclass(frozen=True, slots=True)
++class SsmdDocument:
++    """One rendered SSMD artifact plus original-source provenance."""
++
++    source: SourceInfo
++    metadata: Mapping[str, Any]
++    ssmd: str
++    source_sha256: str
++    speech_semantics: Mapping[str, Any] | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class WorkspaceDocumentStatus:
++    """Recorded and current digest state for an editable document workspace."""
++
++    id: str
++    path: str
++    expected_sha256: str
++    actual_sha256: str
++    dirty: bool
++
++
++@dataclass(frozen=True, slots=True)
++class DocumentWorkspace:
++    """An editable single-document directory bundle and its current state."""
++
++    path: Path
++    document: SsmdDocument
++    status: WorkspaceDocumentStatus
++    dirty: bool
++
++
+ @dataclass(frozen=True, slots=True)
+ class BookInspectionChapter:
+     """Inventory metadata for one source chapter."""
+diff --git a/ssmdconvert/services/document_conversion.py b/ssmdconvert/services/document_conversion.py
+new file mode 100644
+index 0000000..94a7066
+--- /dev/null
++++ b/ssmdconvert/services/document_conversion.py
+@@ -0,0 +1,125 @@
++"""Conversion service for rendered single-document SSMD artifacts."""
++
++from __future__ import annotations
++
++import hashlib
++from collections.abc import Mapping
++from pathlib import Path
++from typing import Any
++
++from ssmd import parse_structure
++
++from ..api import convert_document
++from ..models import SourceInfo, SsmdDocument
++from ..options import DocumentConversionOptions
++from ..policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SequenceFallbackMode
++from ..render import render_document, validate_ssmd_document
++
++
++def _is_ssmd_path(path: Path) -> bool:
++    return path.name.lower().endswith((".ssmd", ".ssmd.md"))
++
++
++def _sha256_file(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest()
++
++
++def _metadata_from_ssmd(raw: bytes, path: Path) -> tuple[str, dict[str, Any]]:
++    try:
++        text = raw.decode("utf-8", errors="strict")
++    except UnicodeDecodeError as exc:
++        raise ValueError(f"SSMD source is not valid UTF-8: {path}: {exc}") from exc
++    try:
++        validate_ssmd_document(text)
++        structure = parse_structure(text, dialect="0.9", normalize=False)
++    except Exception as exc:
++        raise ValueError(f"SSMD source is not valid SSMD 0.9: {path}: {exc}") from exc
++    metadata = dict(structure.header)
++    metadata.pop("ssmd_version", None)
++    return text, metadata
++
++
++def convert_document_artifact(
++    source: str | Path,
++    *,
++    title: str | None = None,
++    author: str | None = None,
++    language: str | None = None,
++    metadata_overrides: Mapping[str, Any] | None = None,
++    sequence_fallback_mode: SequenceFallbackMode | None = None,
++) -> SsmdDocument:
++    """Convert a source into a provenance-bearing SSMD artifact.
++
++    Already-valid SSMD passes through byte-for-byte unless a metadata override or
++    sequence-fallback policy was explicitly requested.
++    """
++    path = Path(source).expanduser().resolve(strict=True)
++    if not path.is_file():
++        raise ValueError(f"document source is not a regular file: {path}")
++    overrides = {} if metadata_overrides is None else dict(metadata_overrides)
++    ssmd_input = _is_ssmd_path(path)
++
++    if ssmd_input:
++        original_bytes = path.read_bytes()
++        source_sha256 = hashlib.sha256(original_bytes).hexdigest()
++        exact_text, source_metadata = _metadata_from_ssmd(original_bytes, path)
++        if (
++            title is None
++            and author is None
++            and language is None
++            and not overrides
++            and sequence_fallback_mode is None
++        ):
++            return SsmdDocument(
++                source=SourceInfo(
++                    format="ssmd",
++                    media_type="text/markdown",
++                    path=path,
++                    name=path.name,
++                ),
++                metadata=source_metadata,
++                ssmd=exact_text,
++                source_sha256=source_sha256,
++            )
++    else:
++        source_sha256 = _sha256_file(path)
++        source_metadata = {}
++
++    effective_mode = sequence_fallback_mode or DEFAULT_SEQUENCE_FALLBACK_MODE
++    options = DocumentConversionOptions(
++        title=title,
++        author=author,
++        language=language,
++        metadata_overrides=overrides,
++        sequence_fallback_mode=effective_mode,
++    )
++    result = convert_document(path, options=options)
++    result_ssmd = result.ssmd
++
++    if ssmd_input and sequence_fallback_mode is None:
++        # Converter's established default is useful for ordinary source formats,
++        # but must not silently replace an existing SSMD sequence policy.
++        if "sequence_fallback_mode" in overrides:
++            result.document.metadata["sequence_fallback_mode"] = overrides["sequence_fallback_mode"]
++        elif "sequence_fallback_mode" in source_metadata:
++            result.document.metadata["sequence_fallback_mode"] = source_metadata[
++                "sequence_fallback_mode"
++            ]
++        else:
++            result.document.metadata.pop("sequence_fallback_mode", None)
++        result_ssmd = render_document(result.document)
++
++    if _sha256_file(path) != source_sha256:
++        raise ValueError(f"document source changed during conversion: {path}")
++    metadata = dict(result.document.metadata)
++    metadata.pop("ssmd_version", None)
++    return SsmdDocument(
++        source=result.document.source,
++        metadata=metadata,
++        ssmd=result_ssmd,
++        source_sha256=source_sha256,
++    )
+diff --git a/tests/test_analysis_source.py b/tests/test_analysis_source.py
+index b68f3b8..676cca5 100644
+--- a/tests/test_analysis_source.py
++++ b/tests/test_analysis_source.py
+@@ -10,7 +10,9 @@ from ssmdconvert import Book, BookChapter, SourceInfo, write_book_bundle
+ from ssmdconvert.analysis import load_ssmd_source, select_sections
+ from ssmdconvert.analysis.fingerprints import content_fingerprint, sha256_file
+ from ssmdconvert.analysis.source import loaded_source_from_book
++from ssmdconvert.document_bundle import write_document_bundle
+ from ssmdconvert.errors import AnalysisSourceError
++from ssmdconvert.models import SsmdDocument
+
+
+ def _ssmd(title: str, body: str) -> str:
+@@ -120,7 +122,7 @@ def test_invalid_source_manifest_is_reported_as_source_error(tmp_path: Path) ->
+     invalid.mkdir()
+     (invalid / "manifest.json").write_text("{", encoding="utf-8")
+
+-    with pytest.raises(AnalysisSourceError, match="could not load SSMD book workspace"):
++    with pytest.raises(AnalysisSourceError, match="could not inspect SSMD workspace"):
+         load_ssmd_source(invalid)
+
+
+@@ -197,3 +199,105 @@ def test_loaded_source_from_book_supports_conversion_time_books(tmp_path: Path)
+     assert [section.id for section in source.sections] == ["chapter-0005", "chapter-0002"]
+     assert [section.source_number for section in source.sections] == [5, 2]
+     assert source.sections[0].ssmd == book.chapters[0].ssmd
++
++
++def _document_bundle(tmp_path: Path, *, format: str = "directory") -> Path:
++    source_bytes = b"original source bytes"
++    document = SsmdDocument(
++        source=SourceInfo(format="ssmd", media_type="text/markdown", name="story.ssmd.md"),
++        metadata={"title": "Story", "language": "en-US"},
++        ssmd=_ssmd("Story", "Measure 5 kg."),
++        source_sha256=hashlib.sha256(source_bytes).hexdigest(),
++    )
++    suffix = ".ssmdoc" if format == "directory" else ".ssmdoc.zip"
++    return write_document_bundle(
++        document,
++        tmp_path / f"story{suffix}",
++        format=format,  # type: ignore[arg-type]
++    )
++
++
++def test_document_directory_and_zip_load_as_single_ssmdoc_section(tmp_path: Path) -> None:
++    directory = _document_bundle(tmp_path)
++    archive = _document_bundle(tmp_path, format="zip")
++
++    source = load_ssmd_source(directory)
++    zipped = load_ssmd_source(archive)
++
++    assert source.kind == source.input_format == "ssmdoc"
++    assert source.workspace_type == "directory"
++    assert source.workspace_status == "clean"
++    assert source.sections[0].id == "document-0001"
++    assert source.sections[0].source_number == 1
++    assert source.sections[0].title == "Story"
++    assert len(source.sections) == 1
++    assert zipped.kind == "ssmdoc"
++    assert zipped.workspace_type == "zip"
++    assert zipped.source_sha256 == hashlib.sha256(archive.read_bytes()).hexdigest()
++    assert (
++        zipped.sections[0].chapter_sha256
++        == hashlib.sha256(source.sections[0].ssmd.encode("utf-8")).hexdigest()
++    )
++
++
++def test_dirty_document_workspace_uses_current_text_and_front_matter(tmp_path: Path) -> None:
++    workspace = _document_bundle(tmp_path)
++    document_path = workspace / "document.ssmd.md"
++    document_path.write_text(_ssmd("Edited title", "Current edited text."), encoding="utf-8")
++
++    source = load_ssmd_source(workspace)
++
++    assert source.workspace_status == "dirty"
++    assert source.dirty_chapters == ("document-0001",)
++    assert source.title == "Edited title"
++    assert source.sections[0].ssmd.endswith("Current edited text.\n")
++    assert (
++        source.sections[0].chapter_sha256 == hashlib.sha256(document_path.read_bytes()).hexdigest()
++    )
++
++
++def test_dot_loads_document_workspace_from_its_directory(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    workspace = _document_bundle(tmp_path)
++    monkeypatch.chdir(workspace)
++
++    source = load_ssmd_source(".")
++
++    assert source.path == workspace.resolve()
++    assert source.kind == "ssmdoc"
++    assert source.sections[0].id == "document-0001"
++
++
++def test_generic_report_txt_context_and_speech_audit_accept_ssmdoc(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    from typer.testing import CliRunner
++
++    from ssmdconvert.cli import app
++
++    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache-home"))
++    workspace = _document_bundle(tmp_path)
++    runner = CliRunner()
++
++    report = runner.invoke(app, ["report", str(workspace), "--format", "json"])
++    assert report.exit_code == 0, report.output
++    payload = json.loads(report.output)
++    assert payload["source"]["input_format"] == "ssmdoc"
++    assert payload["section_stats"][0]["section_id"] == "document-0001"
++    assert (
++        "Dirty document: none"
++        in runner.invoke(app, ["report", str(workspace), "--format", "md"]).output
++    )
++
++    text = runner.invoke(app, ["txt", str(workspace), "--chapters", "1"])
++    assert text.exit_code == 0, text.output
++    assert "five kilograms" in text.output
++
++    speech = runner.invoke(app, ["speech", "audit", str(workspace), "--json"])
++    assert speech.exit_code == 0, speech.output
++
++    change_id = payload["changes"][0]["id"]
++    context = runner.invoke(app, ["context", str(workspace), change_id, "--json"])
++    assert context.exit_code == 0, context.output
++    assert json.loads(context.output)["change"]["section_id"] == "document-0001"
+diff --git a/tests/test_api_facade.py b/tests/test_api_facade.py
+index d2eb736..f8269d7 100644
+--- a/tests/test_api_facade.py
++++ b/tests/test_api_facade.py
+@@ -126,3 +126,21 @@ def test_public_api_is_explicit_and_does_not_retain_ambiguous_convert_alias() ->
+     assert "convert_document" in ssmdconvert.__all__
+     assert "convert" not in ssmdconvert.__all__
+     assert ssmdconvert.convert_document is convert_document
++
++
++def test_document_workspace_api_is_public() -> None:
++    names = (
++        "SsmdDocument",
++        "convert_document_artifact",
++        "DocumentWorkspace",
++        "WorkspaceDocumentStatus",
++        "DocumentBundleError",
++        "DocumentBundleValidationError",
++        "write_document_bundle",
++        "load_document_bundle",
++        "load_document_workspace",
++        "refresh_document_workspace",
++        "validate_document_bundle",
++    )
++    assert set(names) <= set(ssmdconvert.__all__)
++    assert all(getattr(ssmdconvert, name) is not None for name in names)
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 283bc4a..50cbc13 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -49,7 +49,16 @@ def test_enrichment_is_not_a_cli_command() -> None:
+
+ def test_real_command_groups_and_subcommand_help() -> None:
+     expected_commands = {
+-        ("--help",): ("convert", "inspect", "report", "context", "txt", "book", "speech"),
++        ("--help",): (
++            "convert",
++            "inspect",
++            "report",
++            "context",
++            "txt",
++            "book",
++            "document",
++            "speech",
++        ),
+         ("convert", "--help"): (
+             "--force",
+             "-l, --language",
+@@ -100,6 +109,17 @@ def test_real_command_groups_and_subcommand_help() -> None:
+         ),
+         ("book", "metadata", "--help"): ("--json",),
+         ("book", "validate", "--help"): ("--json",),
++        ("document", "--help"): ("convert", "inspect", "metadata", "refresh", "pack", "validate"),
++        ("document", "convert", "--help"): (
++            "--output",
++            "--metadata-file",
++            "--title",
++            "--author",
++            "--language",
++            "--sequence-fallback-mode",
++            "--format",
++            "--force",
++        ),
+     }
+     for args, expected in expected_commands.items():
+         result = runner.invoke(app, list(args))
+@@ -380,7 +400,7 @@ def test_cli_help_keeps_compact_layout_on_wide_terminals() -> None:
+     result = runner.invoke(app, ["--help"], terminal_width=100)
+     assert result.exit_code == 0, result.output
+     assert any(
+-        line.startswith("  convert  Convert a supported input")
++        line.startswith("  convert") and "Convert a supported input" in line
+         for line in result.output.splitlines()
+     )
+
+diff --git a/tests/test_document_bundle.py b/tests/test_document_bundle.py
+new file mode 100644
+index 0000000..d13d2fd
+--- /dev/null
++++ b/tests/test_document_bundle.py
+@@ -0,0 +1,200 @@
++from __future__ import annotations
++
++import hashlib
++import json
++import os
++import stat
++import zipfile
++from pathlib import Path
++
++import pytest
++
++from ssmdconvert.document_bundle import (
++    load_document_bundle,
++    load_document_workspace,
++    refresh_document_workspace,
++    validate_document_bundle,
++    write_document_bundle,
++)
++from ssmdconvert.errors import DocumentBundleError, DocumentBundleValidationError
++from ssmdconvert.models import SourceInfo, SsmdDocument
++
++SSMD = (
++    '---\nssmd_version: "0.9"\ntitle: "Funny printer story"\nlanguage: "en"\n---\n\nHello, 世界.\n'
++)
++SOURCE_SHA256 = hashlib.sha256(b"source bytes").hexdigest()
++
++
++def artifact(ssmd: str = SSMD) -> SsmdDocument:
++    return SsmdDocument(
++        source=SourceInfo(
++            format="ssmd",
++            media_type="text/markdown",
++            name="story.ssmd.md",
++        ),
++        metadata={"title": "Funny printer story", "language": "en"},
++        ssmd=ssmd,
++        source_sha256=SOURCE_SHA256,
++    )
++
++
++def test_directory_and_zip_roundtrip_and_canonical_members(tmp_path: Path) -> None:
++    directory = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
++    archive = write_document_bundle(artifact(), tmp_path / "story.ssmdoc.zip", format="zip")
++
++    assert sorted(path.name for path in directory.iterdir()) == [
++        "document.ssmd.md",
++        "manifest.json",
++    ]
++    with zipfile.ZipFile(archive) as bundle:
++        assert bundle.namelist() == ["manifest.json", "document.ssmd.md"]
++        assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in bundle.infolist())
++        assert all(stat.S_ISREG(info.external_attr >> 16) for info in bundle.infolist())
++    assert load_document_bundle(directory) == artifact()
++    assert load_document_bundle(archive) == artifact()
++    validate_document_bundle(directory)
++    validate_document_bundle(archive)
++    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
++    assert manifest["format"] == "ssmdconvert.document"
++    assert manifest["schema_version"] == 1
++    assert manifest["source"]["sha256"] == SOURCE_SHA256
++    assert manifest["document"]["char_count"] == len(SSMD)
++
++
++def test_zip_publication_is_deterministic(tmp_path: Path) -> None:
++    one = write_document_bundle(artifact(), tmp_path / "one.ssmdoc.zip", format="zip")
++    two = write_document_bundle(artifact(), tmp_path / "two.ssmdoc.zip", format="zip")
++    assert one.read_bytes() == two.read_bytes()
++
++
++def test_strict_loader_rejects_dirty_workspace_but_workspace_loads_it(tmp_path: Path) -> None:
++    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
++    edited = SSMD.replace("Hello", "Hello again")
++    (bundle / "document.ssmd.md").write_text(edited, encoding="utf-8")
++
++    workspace = load_document_workspace(bundle)
++    assert workspace.dirty is True
++    assert workspace.status.id == "document-0001"
++    assert workspace.document.ssmd == edited
++    with pytest.raises(DocumentBundleValidationError, match="SHA256 mismatch"):
++        load_document_bundle(bundle)
++
++
++def test_refresh_updates_hash_count_preserves_manifest_mode_and_ignores_readio(
++    tmp_path: Path,
++) -> None:
++    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
++    manifest_path = bundle / "manifest.json"
++    manifest_path.chmod(0o640)
++    readio = bundle / ".readio" / "cache" / "state.json"
++    readio.parent.mkdir(parents=True)
++    readio.write_text("local state", encoding="utf-8")
++    edited = SSMD + "\nMore text.\n"
++    (bundle / "document.ssmd.md").write_text(edited, encoding="utf-8")
++
++    refreshed = refresh_document_workspace(bundle)
++
++    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++    assert manifest["document"]["sha256"] == hashlib.sha256(edited.encode()).hexdigest()
++    assert manifest["document"]["char_count"] == len(edited)
++    assert stat.S_IMODE(manifest_path.stat().st_mode) == 0o640
++    assert refreshed.dirty is False
++    assert readio.read_text(encoding="utf-8") == "local state"
++    validate_document_bundle(bundle)
++
++
++def test_forced_directory_replacement_removes_unrelated_stale_files(tmp_path: Path) -> None:
++    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
++    (bundle / "stale.txt").write_text("stale", encoding="utf-8")
++    with pytest.raises(DocumentBundleError, match="already exists"):
++        write_document_bundle(artifact(), bundle, format="directory")
++
++    write_document_bundle(artifact(), bundle, format="directory", overwrite=True)
++    assert not (bundle / "stale.txt").exists()
++    validate_document_bundle(bundle)
++
++
++def test_failed_forced_directory_replacement_restores_previous_workspace(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    from ssmdconvert import document_bundle
++
++    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
++    (bundle / "keep.txt").write_text("old bundle", encoding="utf-8")
++    original_manifest = (bundle / "manifest.json").read_bytes()
++    original_replace = document_bundle.os.replace
++    failed = False
++
++    def fail_publish(source: str | os.PathLike[str], destination: str | os.PathLike[str]) -> None:
++        nonlocal failed
++        source_path = Path(source)
++        destination_path = Path(destination)
++        if (
++            not failed
++            and destination_path == bundle
++            and source_path.name.startswith(".story.ssmdoc.tmp-")
++        ):
++            failed = True
++            raise OSError("simulated final rename failure")
++        original_replace(source, destination)
++
++    monkeypatch.setattr(document_bundle.os, "replace", fail_publish)
++    with pytest.raises(DocumentBundleError, match="simulated final rename failure"):
++        write_document_bundle(artifact(), bundle, format="directory", overwrite=True)
++
++    assert failed
++    assert (bundle / "keep.txt").read_text(encoding="utf-8") == "old bundle"
++    assert (bundle / "manifest.json").read_bytes() == original_manifest
++
++
++def test_directory_symlink_escape_is_rejected(tmp_path: Path) -> None:
++    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
++    outside = tmp_path / "outside.ssmd.md"
++    outside.write_text(SSMD, encoding="utf-8")
++    (bundle / "document.ssmd.md").unlink()
++    try:
++        (bundle / "document.ssmd.md").symlink_to(outside)
++    except OSError as exc:
++        pytest.skip(f"symlinks unavailable: {exc}")
++
++    with pytest.raises(DocumentBundleValidationError, match="outside the bundle directory"):
++        load_document_bundle(bundle)
++
++
++def test_manifest_schema_and_content_corruption_are_rejected(tmp_path: Path) -> None:
++    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
++    manifest_path = bundle / "manifest.json"
++    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++    manifest["document"]["id"] = "chapter-0001"
++    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
++    with pytest.raises(DocumentBundleValidationError, match="document id"):
++        load_document_bundle(bundle)
++
++    write_document_bundle(artifact(), bundle, format="directory", overwrite=True)
++    (bundle / "document.ssmd.md").write_bytes(b"\xff")
++    with pytest.raises(DocumentBundleValidationError, match="not UTF-8"):
++        load_document_workspace(bundle)
++
++
++def test_zip_duplicate_names_and_symlinks_are_rejected(tmp_path: Path) -> None:
++    good = write_document_bundle(artifact(), tmp_path / "good.ssmdoc.zip", format="zip")
++    duplicate = tmp_path / "duplicate.zip"
++    with zipfile.ZipFile(good) as source, zipfile.ZipFile(duplicate, "w") as target:
++        target.writestr("manifest.json", source.read("manifest.json"))
++        target.writestr("document.ssmd.md", source.read("document.ssmd.md"))
++        target.writestr("document.ssmd.md", source.read("document.ssmd.md"))
++    with pytest.raises(DocumentBundleValidationError, match="duplicate"):
++        load_document_bundle(duplicate)
++
++    symlink = tmp_path / "symlink.zip"
++    with zipfile.ZipFile(good) as source, zipfile.ZipFile(symlink, "w") as target:
++        for info in source.infolist():
++            copied = zipfile.ZipInfo(info.filename)
++            copied.external_attr = info.external_attr
++            target.writestr(copied, source.read(info.filename))
++        entry = zipfile.ZipInfo("evil")
++        entry.create_system = 3
++        entry.external_attr = (stat.S_IFLNK | 0o777) << 16
++        target.writestr(entry, "../../outside")
++    with pytest.raises(DocumentBundleValidationError, match="symlink"):
++        load_document_bundle(symlink)
+diff --git a/tests/test_document_cli.py b/tests/test_document_cli.py
+new file mode 100644
+index 0000000..89f1409
+--- /dev/null
++++ b/tests/test_document_cli.py
+@@ -0,0 +1,150 @@
++from __future__ import annotations
++
++import hashlib
++import json
++import zipfile
++from pathlib import Path
++
++from ssmd import parse_structure
++from typer.testing import CliRunner
++
++from ssmdconvert.cli import app
++from ssmdconvert.document_bundle import load_document_bundle
++
++runner = CliRunner()
++SSMD = (
++    '---\nssmd_version: "0.9"\ntitle: "Reviewed story"\nlanguage: "en"\n'
++    "pause_defaults:\n  enabled: true\n---\n\n"
++    "Opening paragraph.\n\n"
++    ':::{voice="guest"}\nGuest text.\n:::\n'
++)
++
++
++def test_document_convert_preserves_reviewed_ssmd_and_default_name(tmp_path: Path) -> None:
++    source = tmp_path / "story.ssmd.md"
++    source.write_bytes(SSMD.encode("utf-8"))
++
++    result = runner.invoke(app, ["document", "convert", str(source)])
++
++    bundle = tmp_path / "story.ssmdoc"
++    assert result.exit_code == 0, result.output
++    assert bundle.is_dir()
++    assert not (tmp_path / "story.ssmd.ssmdoc").exists()
++    assert (bundle / "document.ssmd.md").read_bytes() == source.read_bytes()
++    manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
++    assert manifest["source"]["name"] == source.name
++    assert manifest["source"]["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
++    assert manifest["metadata"]["title"] == "Reviewed story"
++    assert manifest["metadata"]["language"] == "en"
++    assert manifest["metadata"]["pause_defaults"] == {"enabled": True}
++    assert 'voice="guest"' in (bundle / "document.ssmd.md").read_text(encoding="utf-8")
++
++
++def test_document_convert_non_ssmd_source_captures_original_hash(tmp_path: Path) -> None:
++    source = tmp_path / "notes.md"
++    source.write_text("# Notes\n\nA paragraph.", encoding="utf-8")
++
++    result = runner.invoke(app, ["document", "convert", str(source)])
++
++    output = tmp_path / "notes.ssmdoc"
++    assert result.exit_code == 0, result.output
++    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
++    assert manifest["source"]["format"] == "markdown"
++    assert manifest["source"]["sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
++    assert load_document_bundle(output).ssmd.startswith("---\n")
++
++    ssmd_source = tmp_path / "draft.ssmd"
++    ssmd_source.write_text(SSMD, encoding="utf-8")
++    result = runner.invoke(app, ["document", "convert", str(ssmd_source)])
++    assert result.exit_code == 0, result.output
++    assert (tmp_path / "draft.ssmdoc" / "document.ssmd.md").is_file()
++
++
++def test_document_convert_metadata_override_rerenders_ssmd(tmp_path: Path) -> None:
++    source = tmp_path / "story.ssmd"
++    source.write_text(SSMD, encoding="utf-8")
++    output = tmp_path / "reviewed.ssmdoc"
++
++    result = runner.invoke(
++        app,
++        ["document", "convert", str(source), "-o", str(output), "--title", "New title"],
++    )
++
++    assert result.exit_code == 0, result.output
++    document = load_document_bundle(output)
++    assert document.metadata["title"] == "New title"
++    header = parse_structure(document.ssmd, dialect="0.9").header
++    assert header["title"] == "New title"
++    assert "sequence_fallback_mode" not in header
++    assert 'voice="guest"' in document.ssmd
++
++
++def test_document_convert_zip_format_and_nonstandard_output_error(tmp_path: Path) -> None:
++    source = tmp_path / "story.ssmd.md"
++    source.write_text(SSMD, encoding="utf-8")
++    archive = tmp_path / "story.ssmdoc.zip"
++    result = runner.invoke(app, ["document", "convert", str(source), "-o", str(archive)])
++    assert result.exit_code == 0, result.output
++    with zipfile.ZipFile(archive) as bundle:
++        assert bundle.namelist() == ["manifest.json", "document.ssmd.md"]
++
++    bad = runner.invoke(app, ["document", "convert", str(source), "-o", str(tmp_path / "artifact")])
++    assert bad.exit_code == 2
++    assert "pass --format directory or --format zip" in bad.output
++
++    explicit = runner.invoke(
++        app,
++        [
++            "document",
++            "convert",
++            str(source),
++            "-o",
++            str(tmp_path / "artifact"),
++            "--format",
++            "directory",
++        ],
++    )
++    assert explicit.exit_code == 0, explicit.output
++    assert (tmp_path / "artifact" / "manifest.json").is_file()
++
++
++def test_document_cli_validate_metadata_refresh_and_pack(tmp_path: Path) -> None:
++    source = tmp_path / "source.ssmd.md"
++    source.write_text(SSMD, encoding="utf-8")
++    bundle = tmp_path / "source.ssmdoc"
++    converted = runner.invoke(app, ["document", "convert", str(source)])
++    assert converted.exit_code == 0, converted.output
++
++    validated = runner.invoke(app, ["document", "validate", str(bundle)])
++    assert validated.exit_code == 0, validated.output
++    assert "Valid document bundle" in validated.output
++    json_validated = runner.invoke(app, ["document", "validate", str(bundle), "--json"])
++    assert json_validated.exit_code == 0
++    assert json.loads(json_validated.output) == {"valid": True, "bundle": str(bundle)}
++
++    metadata = runner.invoke(app, ["document", "metadata", str(bundle)])
++    assert metadata.exit_code == 0, metadata.output
++    assert "Workspace: directory" in metadata.output
++    assert "Dirty document: 0" in metadata.output
++    assert "Title: Reviewed story" in metadata.output
++    metadata_json = runner.invoke(app, ["document", "metadata", str(bundle), "--json"])
++    assert metadata_json.exit_code == 0
++    assert json.loads(metadata_json.output)["metadata"]["language"] == "en"
++
++    (bundle / "document.ssmd.md").write_text(SSMD + "\nChanged.\n", encoding="utf-8")
++    dirty = runner.invoke(app, ["document", "metadata", str(bundle)])
++    assert dirty.exit_code == 0, dirty.output
++    assert "Status: dirty" in dirty.output
++    check = runner.invoke(app, ["document", "refresh", str(bundle), "--check"])
++    assert check.exit_code == 1
++    assert "Workspace dirty" in check.output
++    refreshed = runner.invoke(app, ["document", "refresh", str(bundle)])
++    assert refreshed.exit_code == 0, refreshed.output
++    assert "Status: clean" in refreshed.output
++
++    archive = tmp_path / "packed.ssmdoc.zip"
++    packed = runner.invoke(app, ["document", "pack", str(bundle), "-o", str(archive)])
++    assert packed.exit_code == 0, packed.output
++    assert load_document_bundle(archive).ssmd.endswith("Changed.\n")
++    with zipfile.ZipFile(archive) as zipped:
++        assert zipped.namelist() == ["manifest.json", "document.ssmd.md"]
+diff --git a/tests/test_document_speech.py b/tests/test_document_speech.py
+new file mode 100644
+index 0000000..7234504
+--- /dev/null
++++ b/tests/test_document_speech.py
+@@ -0,0 +1,126 @@
++from __future__ import annotations
++
++import hashlib
++from pathlib import Path
++from typing import Literal
++
++import pytest
++from ssmd import parse_structure
++from typer.testing import CliRunner
++
++import ssmdconvert.cli as cli_module
++from ssmdconvert.cli import app
++from ssmdconvert.document_bundle import (
++    load_document_bundle,
++    load_document_workspace,
++    write_document_bundle,
++)
++from ssmdconvert.models import SourceInfo, SsmdDocument
++
++runner = CliRunner()
++
++
++def _document() -> SsmdDocument:
++    ssmd = '---\nssmd_version: "0.9"\ntitle: "Speech test"\nlanguage: en-US\n---\nMeasure 5 kg.\n'
++    return SsmdDocument(
++        source=SourceInfo(
++            format="markdown",
++            media_type="text/markdown",
++            name="source.md",
++        ),
++        metadata={"title": "Speech test", "language": "en-US"},
++        ssmd=ssmd,
++        source_sha256=hashlib.sha256(b"source artifact").hexdigest(),
++    )
++
++
++def _workspace_bytes(path: Path) -> dict[str, bytes]:
++    return {
++        item.relative_to(path).as_posix(): item.read_bytes()
++        for item in path.rglob("*")
++        if item.is_file()
++    }
++
++
++@pytest.mark.parametrize(
++    ("source_format", "output_format"),
++    [("directory", "directory"), ("directory", "zip"), ("zip", "directory"), ("zip", "zip")],
++)
++def test_speech_freeze_publishes_ssmdoc_without_mutating_source(
++    tmp_path: Path,
++    source_format: Literal["directory", "zip"],
++    output_format: Literal["directory", "zip"],
++) -> None:
++    source = tmp_path / ("source.ssmdoc" if source_format == "directory" else "source.ssmdoc.zip")
++    output = tmp_path / ("frozen.ssmdoc" if output_format == "directory" else "frozen.ssmdoc.zip")
++    original = _document()
++    write_document_bundle(original, source, format=source_format)
++    before = _workspace_bytes(source) if source.is_dir() else source.read_bytes()
++
++    result = runner.invoke(app, ["speech", "freeze", str(source), "-o", str(output)])
++
++    assert result.exit_code == 0, result.output
++    frozen = load_document_bundle(output)
++    assert "{sub=" in frozen.ssmd
++    assert (
++        parse_structure(frozen.ssmd, dialect="0.9", normalize=False).clean_text
++        == parse_structure(original.ssmd, dialect="0.9", normalize=False).clean_text
++    )
++    assert frozen.source_sha256 == original.source_sha256
++    assert frozen.metadata == original.metadata
++    assert frozen.speech_semantics is not None
++    assert frozen.speech_semantics["status"] == "complete"
++    assert frozen.speech_semantics["source_sha256"] == original.source_sha256
++    after = _workspace_bytes(source) if source.is_dir() else source.read_bytes()
++    assert after == before
++
++
++def test_speech_freeze_accepts_dirty_workspace_and_preserves_its_current_content(
++    tmp_path: Path,
++) -> None:
++    source = tmp_path / "dirty.ssmdoc"
++    output = tmp_path / "frozen.ssmdoc"
++    write_document_bundle(_document(), source, format="directory")
++    current_path = source / "document.ssmd.md"
++    current_path.write_text(
++        current_path.read_text(encoding="utf-8").replace("Measure", "Please measure"),
++        encoding="utf-8",
++    )
++    dirty_before = _workspace_bytes(source)
++    assert load_document_workspace(source).dirty
++
++    result = runner.invoke(app, ["speech", "freeze", str(source), "-o", str(output)])
++
++    assert result.exit_code == 0, result.output
++    frozen = load_document_bundle(output)
++    assert frozen.ssmd.startswith('---\nssmd_version: "0.9"')
++    assert "Please measure" in frozen.ssmd
++    assert "{sub=" in frozen.ssmd
++    assert _workspace_bytes(source) == dirty_before
++
++
++def test_speech_freeze_rejects_source_change_during_materialization(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    source = tmp_path / "source.ssmdoc"
++    output = tmp_path / "must-not-exist.ssmdoc"
++    write_document_bundle(_document(), source, format="directory")
++    document_path = source / "document.ssmd.md"
++    original_freeze = cli_module.freeze_speech_api
++
++    def mutate_after_freeze(analysis: object) -> object:
++        frozen = original_freeze(analysis)  # type: ignore[arg-type]
++        document_path.write_text(
++            document_path.read_text(encoding="utf-8").replace("5 kg", "6 kg"),
++            encoding="utf-8",
++        )
++        return frozen
++
++    monkeypatch.setattr(cli_module, "freeze_speech_api", mutate_after_freeze)
++    result = runner.invoke(app, ["speech", "freeze", str(source), "-o", str(output)])
++
++    assert result.exit_code == 1
++    assert "source section document-0001 changed" in result.output
++    assert not output.exists()
++    assert "6 kg" in document_path.read_text(encoding="utf-8")

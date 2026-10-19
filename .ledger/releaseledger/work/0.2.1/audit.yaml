@@ -1,0 +1,71 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.2.1
+git_base_ref: v0.2.0
+git_base_sha: 51ccb48a4b591b630d7d51872a38d7831b7f6d05
+git_head_ref: HEAD
+git_head_sha: 9e5137fd863c136ede99afaf890d7fb6024ac05e
+git_range: 51ccb48a4b591b630d7d51872a38d7831b7f6d05..9e5137fd863c136ede99afaf890d7fb6024ac05e
+commit_count: 2
+rows:
+  - sha: 75f9afe764881bc83d25715ee2706c7104da528e
+    source_ref: git:75f9afe764881bc83d25715ee2706c7104da528e
+    short_sha: 75f9afe
+    changed_paths:
+      - README.md
+      - docs/analysis-workflows.md
+      - docs/api.md
+      - docs/bundle-format.md
+      - docs/document-bundle-format.md
+      - docs/documents.md
+      - docs/index.md
+      - docs/usage.md
+      - ssmdconvert/__init__.py
+      - ssmdconvert/analysis/context.py
+      - ssmdconvert/analysis/models.py
+      - ssmdconvert/analysis/prepare.py
+      - ssmdconvert/analysis/reporting.py
+      - ssmdconvert/analysis/source.py
+      - ssmdconvert/bundle.py
+      - ssmdconvert/cli.py
+      - ssmdconvert/document_bundle.py
+      - ssmdconvert/errors.py
+      - ssmdconvert/models.py
+      - ssmdconvert/services/document_conversion.py
+      - tests/test_analysis_source.py
+      - tests/test_api_facade.py
+      - tests/test_cli.py
+      - tests/test_document_bundle.py
+      - tests/test_document_cli.py
+      - tests/test_document_speech.py
+    stats:
+      files_changed: 26
+      insertions: 2215
+      deletions: 43
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: document convert support"
+  - sha: 9e5137fd863c136ede99afaf890d7fb6024ac05e
+    source_ref: git:9e5137fd863c136ede99afaf890d7fb6024ac05e
+    short_sha: 9e5137f
+    changed_paths:
+      - docs/document-bundle-format.md
+      - ssmdconvert/document_bundle.py
+    stats:
+      files_changed: 2
+      insertions: 20
+      deletions: 8
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: document"

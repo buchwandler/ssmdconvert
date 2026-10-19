@@ -1,0 +1,63 @@
+{
+  "candidate_count": 2,
+  "candidates": [
+    {
+      "additions": 2215,
+      "deletions": 43,
+      "patch_file": "75f9afe.patch",
+      "patch_sha256": "228c565c7f79631cd82c19b8607ecf84a1ea52ce259fa866532a336e88c81b80",
+      "paths": [
+        "README.md",
+        "docs/analysis-workflows.md",
+        "docs/api.md",
+        "docs/bundle-format.md",
+        "docs/document-bundle-format.md",
+        "docs/documents.md",
+        "docs/index.md",
+        "docs/usage.md",
+        "ssmdconvert/__init__.py",
+        "ssmdconvert/analysis/context.py",
+        "ssmdconvert/analysis/models.py",
+        "ssmdconvert/analysis/prepare.py",
+        "ssmdconvert/analysis/reporting.py",
+        "ssmdconvert/analysis/source.py",
+        "ssmdconvert/bundle.py",
+        "ssmdconvert/cli.py",
+        "ssmdconvert/document_bundle.py",
+        "ssmdconvert/errors.py",
+        "ssmdconvert/models.py",
+        "ssmdconvert/services/document_conversion.py",
+        "tests/test_analysis_source.py",
+        "tests/test_api_facade.py",
+        "tests/test_cli.py",
+        "tests/test_document_bundle.py",
+        "tests/test_document_cli.py",
+        "tests/test_document_speech.py"
+      ],
+      "sha": "75f9afe764881bc83d25715ee2706c7104da528e",
+      "short_sha": "75f9afe",
+      "source_ref": "git:75f9afe764881bc83d25715ee2706c7104da528e"
+    },
+    {
+      "additions": 20,
+      "deletions": 8,
+      "patch_file": "9e5137f.patch",
+      "patch_sha256": "cb0065b9487cc82564bb9e126a42639161097ab94d3fc3f0e0c4db56c7cf470b",
+      "paths": [
+        "docs/document-bundle-format.md",
+        "ssmdconvert/document_bundle.py"
+      ],
+      "sha": "9e5137fd863c136ede99afaf890d7fb6024ac05e",
+      "short_sha": "9e5137f",
+      "source_ref": "git:9e5137fd863c136ede99afaf890d7fb6024ac05e"
+    }
+  ],
+  "git_base_ref": "51ccb48a4b591b630d7d51872a38d7831b7f6d05",
+  "git_base_sha": "51ccb48a4b591b630d7d51872a38d7831b7f6d05",
+  "git_head_ref": "9e5137fd863c136ede99afaf890d7fb6024ac05e",
+  "git_head_sha": "9e5137fd863c136ede99afaf890d7fb6024ac05e",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.2.1",
+  "schema_version": 1
+}
