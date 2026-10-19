@@ -2,6 +2,8 @@
 
 A directory ending in `.ssmdbook/` is the canonical editable book workspace; a `.ssmdbook.zip` is an immutable portable artifact. Both use the same versioned manifest model. `load_book_bundle()` and `validate_book_bundle()` remain strict for both formats, including recorded chapter digests. Use the separate workspace API to inspect edited directory chapters whose digests are stale.
 
+This page describes the book format only. Single-document `.ssmdoc` artifacts use a distinct manifest and API; see [`.ssmdoc` bundle format](document-bundle-format.md).
+
 ```text
 format:         ssmdconvert.book
 schema_version: 1

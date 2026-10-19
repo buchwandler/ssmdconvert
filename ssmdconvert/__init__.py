@@ -33,11 +33,20 @@ from .bundle import (
     write_book_bundle,
 )
 from .converter import Converter
+from .document_bundle import (
+    load_document_bundle,
+    load_document_workspace,
+    refresh_document_workspace,
+    validate_document_bundle,
+    write_document_bundle,
+)
 from .errors import (
     BookBundleError,
     BookBundleValidationError,
     BookError,
     ChapterSelectionError,
+    DocumentBundleError,
+    DocumentBundleValidationError,
     LinguisticsError,
     MissingDependencyError,
     SSMDConvertError,
@@ -53,9 +62,12 @@ from .models import (
     BookWorkspace,
     ConversionResult,
     Document,
+    DocumentWorkspace,
     Section,
     SourceInfo,
+    SsmdDocument,
     WorkspaceChapterStatus,
+    WorkspaceDocumentStatus,
 )
 from .options import (
     AnalysisOptions,
@@ -71,6 +83,7 @@ from .results import (
     SpeechOutcome,
     SsmdChangeContext,
 )
+from .services.document_conversion import convert_document_artifact
 
 try:
     from ._version import version as __version__
@@ -119,8 +132,11 @@ __all__ = [
     "ChapterSelectionError",
     "ConversionResult",
     "Converter",
+    "DocumentBundleError",
+    "DocumentBundleValidationError",
     "Document",
     "DocumentConversionOptions",
+    "DocumentWorkspace",
     "LinguisticsConfig",
     "LinguisticsError",
     "MissingDependencyError",
@@ -135,6 +151,7 @@ __all__ = [
     "SpeechFreezeFailure",
     "ProjectedText",
     "Section",
+    "SsmdDocument",
     "SourceInfo",
     "SpeechOptions",
     "SpeechOutcome",
@@ -143,6 +160,7 @@ __all__ = [
     "UnsupportedBookSourceError",
     "UnsupportedInputError",
     "WorkspaceChapterStatus",
+    "WorkspaceDocumentStatus",
     "__version__",
     "analyze_cached",
     "analyze_ssmd",
@@ -151,6 +169,7 @@ __all__ = [
     "convert_book",
     "convert_content",
     "convert_document",
+    "convert_document_artifact",
     "freeze_speech",
     "inspect_book",
     "inspect_document",
@@ -162,4 +181,9 @@ __all__ = [
     "refresh_book_workspace",
     "validate_book_bundle",
     "write_book_bundle",
+    "load_document_bundle",
+    "load_document_workspace",
+    "refresh_document_workspace",
+    "validate_document_bundle",
+    "write_document_bundle",
 ]

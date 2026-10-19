@@ -37,8 +37,8 @@ class LoadedSsmdSource:
     """Validated SSMD content plus application-level source/workspace identity."""
 
     path: Path
-    kind: Literal["ssmd", "ssmdbook"]
-    input_format: Literal["ssmd", "ssmdbook"]
+    kind: Literal["ssmd", "ssmdoc", "ssmdbook"]
+    input_format: Literal["ssmd", "ssmdoc", "ssmdbook"]
     title: str | None
     metadata: Mapping[str, Any]
     sections: tuple[LoadedSsmdSection, ...]

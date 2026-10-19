@@ -26,6 +26,14 @@ class BookBundleValidationError(BookBundleError):
     """A book bundle has invalid structure or content."""
 
 
+class DocumentBundleError(SSMDConvertError):
+    """A document bundle could not be read or written."""
+
+
+class DocumentBundleValidationError(DocumentBundleError):
+    """A document bundle has invalid structure or content."""
+
+
 class MissingDependencyError(SSMDConvertError):
     """An optional adapter/enricher dependency is not installed."""
 

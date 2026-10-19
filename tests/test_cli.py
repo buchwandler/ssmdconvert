@@ -49,7 +49,16 @@ def test_enrichment_is_not_a_cli_command() -> None:
 
 def test_real_command_groups_and_subcommand_help() -> None:
     expected_commands = {
-        ("--help",): ("convert", "inspect", "report", "context", "txt", "book", "speech"),
+        ("--help",): (
+            "convert",
+            "inspect",
+            "report",
+            "context",
+            "txt",
+            "book",
+            "document",
+            "speech",
+        ),
         ("convert", "--help"): (
             "--force",
             "-l, --language",
@@ -100,6 +109,17 @@ def test_real_command_groups_and_subcommand_help() -> None:
         ),
         ("book", "metadata", "--help"): ("--json",),
         ("book", "validate", "--help"): ("--json",),
+        ("document", "--help"): ("convert", "inspect", "metadata", "refresh", "pack", "validate"),
+        ("document", "convert", "--help"): (
+            "--output",
+            "--metadata-file",
+            "--title",
+            "--author",
+            "--language",
+            "--sequence-fallback-mode",
+            "--format",
+            "--force",
+        ),
     }
     for args, expected in expected_commands.items():
         result = runner.invoke(app, list(args))
@@ -380,7 +400,7 @@ def test_cli_help_keeps_compact_layout_on_wide_terminals() -> None:
     result = runner.invoke(app, ["--help"], terminal_width=100)
     assert result.exit_code == 0, result.output
     assert any(
-        line.startswith("  convert  Convert a supported input")
+        line.startswith("  convert") and "Convert a supported input" in line
         for line in result.output.splitlines()
     )
 

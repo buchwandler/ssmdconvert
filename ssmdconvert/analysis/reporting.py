@@ -288,6 +288,7 @@ def render_markdown_report(
 ) -> str:
     """Render the ordered human-facing ssmdconvert report sections."""
     stats = report.preparation.stats
+    dirty_label = "Dirty document" if report.source.input_format == "ssmdoc" else "Dirty chapters"
     unit_contexts = {
         unit_id: context.id for context in report.contexts for unit_id in context.unit_ids
     }
@@ -330,7 +331,7 @@ def render_markdown_report(
         "",
         f"- Type: {report.workspace.type}",
         f"- Status: {report.workspace.status}",
-        f"- Dirty chapters: {_cell(', '.join(report.workspace.dirty_chapters) or 'none')}",
+        f"- {dirty_label}: {_cell(', '.join(report.workspace.dirty_chapters) or 'none')}",
         "",
         "## SSMD semantics",
         "",

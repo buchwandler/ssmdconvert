@@ -9,8 +9,13 @@ from typing import Any
 from ssmd import parse_structure
 
 from ..bundle import load_book_bundle, load_book_workspace
+from ..document_bundle import (
+    load_document_bundle,
+    load_document_workspace,
+    probe_bundle_format,
+)
 from ..errors import AnalysisSourceError
-from ..models import Book, BookWorkspace
+from ..models import Book, SsmdDocument
 from ..render import validate_ssmd_document
 from .fingerprints import content_fingerprint, sha256_bytes, sha256_file
 from .models import (
@@ -79,6 +84,48 @@ def loaded_source_from_book(
     )
 
 
+def loaded_source_from_document(
+    document: SsmdDocument,
+    *,
+    path: Path,
+    workspace_type: WorkspaceType,
+    workspace_status: WorkspaceStatus,
+    dirty: bool = False,
+    actual_sha256: str | None = None,
+    artifact_sha256: str | None = None,
+) -> LoadedSsmdSource:
+    """Adapt a rendered document to the canonical one-section analysis source."""
+    try:
+        structure = parse_structure(document.ssmd, dialect="0.9", normalize=False)
+    except Exception as exc:
+        raise AnalysisSourceError(f"could not parse document metadata from {path}: {exc}") from exc
+    metadata = dict(structure.header)
+    metadata.pop("ssmd_version", None)
+    document_sha256 = actual_sha256 or sha256_bytes(document.ssmd.encode("utf-8"))
+    section = LoadedSsmdSection(
+        id="document-0001",
+        index=1,
+        title=_title(metadata),
+        level=1,
+        ssmd=_normalize_newlines(document.ssmd),
+        source_number=1,
+        chapter_sha256=document_sha256,
+    )
+    return LoadedSsmdSource(
+        path=path,
+        kind="ssmdoc",
+        input_format="ssmdoc",
+        title=_title(metadata),
+        metadata=metadata,
+        sections=(section,),
+        source_sha256=artifact_sha256 or document.source_sha256,
+        content_fingerprint=content_fingerprint(((section.id, document_sha256),), metadata),
+        workspace_type=workspace_type,
+        workspace_status=workspace_status,
+        dirty_chapters=(section.id,) if dirty else (),
+    )
+
+
 def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
     """Load and validate a supported SSMD file, bundle, or editable workspace."""
     requested = Path(source).expanduser()
@@ -91,20 +138,44 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
 
     if path.is_dir():
         try:
-            workspace: BookWorkspace = load_book_workspace(path)
+            bundle_format = probe_bundle_format(path)
         except Exception as exc:
-            raise AnalysisSourceError(f"could not load SSMD book workspace {path}: {exc}") from exc
-        dirty = tuple(chapter.id for chapter in workspace.chapters if chapter.dirty)
-        chapter_hashes = {chapter.id: chapter.actual_sha256 for chapter in workspace.chapters}
-        return loaded_source_from_book(
-            workspace.book,
-            path=path,
-            workspace_type="directory",
-            workspace_status="dirty" if workspace.dirty else "clean",
-            dirty_chapters=dirty,
-            chapter_hashes=chapter_hashes,
-        )
-
+            raise AnalysisSourceError(f"could not inspect SSMD workspace {path}: {exc}") from exc
+        if bundle_format == "ssmdconvert.document":
+            try:
+                document_workspace = load_document_workspace(path)
+            except Exception as exc:
+                raise AnalysisSourceError(
+                    f"could not load SSMD document workspace {path}: {exc}"
+                ) from exc
+            return loaded_source_from_document(
+                document_workspace.document,
+                path=path,
+                workspace_type="directory",
+                workspace_status="dirty" if document_workspace.dirty else "clean",
+                dirty=document_workspace.dirty,
+                actual_sha256=document_workspace.status.actual_sha256,
+            )
+        if bundle_format == "ssmdconvert.book":
+            try:
+                book_workspace = load_book_workspace(path)
+            except Exception as exc:
+                raise AnalysisSourceError(
+                    f"could not load SSMD book workspace {path}: {exc}"
+                ) from exc
+            dirty = tuple(chapter.id for chapter in book_workspace.chapters if chapter.dirty)
+            chapter_hashes = {
+                chapter.id: chapter.actual_sha256 for chapter in book_workspace.chapters
+            }
+            return loaded_source_from_book(
+                book_workspace.book,
+                path=path,
+                workspace_type="directory",
+                workspace_status="dirty" if book_workspace.dirty else "clean",
+                dirty_chapters=dirty,
+                chapter_hashes=chapter_hashes,
+            )
+        raise AnalysisSourceError(f"unsupported SSMD workspace format in {path}: {bundle_format!r}")
     if not path.is_file():
         raise AnalysisSourceError(
             f"SSMD source is not a regular file or workspace directory: {path}"
@@ -124,9 +195,22 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
             artifact_sha256=sha256_file(path),
         )
 
+    if lowered_name.endswith((".ssmdoc", ".ssmdoc.zip")):
+        try:
+            document = load_document_bundle(path)
+        except Exception as exc:
+            raise AnalysisSourceError(f"could not load SSMD document bundle {path}: {exc}") from exc
+        return loaded_source_from_document(
+            document,
+            path=path,
+            workspace_type="zip",
+            workspace_status="valid",
+            artifact_sha256=sha256_file(path),
+        )
+
     if not (lowered_name.endswith(".ssmd") or lowered_name.endswith(".ssmd.md")):
         raise AnalysisSourceError(
-            f"unsupported SSMD source {path}; expected .ssmd, .ssmd.md, or .ssmdbook"
+            f"unsupported SSMD source {path}; expected .ssmd, .ssmd.md, .ssmdbook, or .ssmdoc"
         )
 
     try:

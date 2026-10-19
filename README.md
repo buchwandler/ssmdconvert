@@ -81,6 +81,20 @@ ssmdconvert convert manuscript.md -o manuscript.ssmd
 ssmdconvert book convert novel.epub --language de-DE --metadata-file book-metadata.yaml -o novel.ssmdbook
 ```
 
+## Create a single-document workspace
+
+Keep an SSMD document in an editable `.ssmdoc` workspace or a portable ZIP without changing the existing standalone `convert` command:
+
+```bash
+ssmdconvert document convert story.ssmd.md
+ssmdconvert document validate story.ssmdoc
+ssmdconvert document pack story.ssmdoc -o story.ssmdoc.zip
+ssmdconvert report story.ssmdoc
+ssmdconvert speech freeze story.ssmdoc -o frozen.ssmdoc.zip
+```
+
+A valid SSMD source is copied losslessly when no metadata override is supplied. Dirty workspaces use their current valid text for analysis; refresh is explicit, and speech write-back publishes a new bundle rather than mutating the source. See the [single-document workspace guide](docs/documents.md) and [document bundle format](docs/document-bundle-format.md).
+
 ## Convert an EPUB book
 
 ```bash

@@ -698,10 +698,31 @@ def load_book_bundle(source: str | Path) -> Book:
     _invalid(str(path), "bundle is not a regular file or directory")
 
 
-def read_current_chapter_bytes(source: str | Path, chapter_id: str) -> bytes:
+def read_current_section_bytes(source: str | Path, chapter_id: str) -> bytes:
     """Read only one chapter's current bytes for affected-chapter freshness checks."""
     path = Path(source).expanduser().resolve(strict=True)
     display = str(path)
+    if path.is_dir():
+        from .document_bundle import probe_bundle_format, read_current_document_bytes
+
+        if probe_bundle_format(path) == "ssmdconvert.document":
+            if chapter_id != "document-0001":
+                from .errors import DocumentBundleValidationError
+
+                raise DocumentBundleValidationError(
+                    f"{display}: document {chapter_id!r} is not present in the workspace"
+                )
+            return read_current_document_bytes(path)
+    elif path.is_file() and path.name.lower().endswith((".ssmdoc", ".ssmdoc.zip")):
+        if chapter_id != "document-0001":
+            from .errors import DocumentBundleValidationError
+
+            raise DocumentBundleValidationError(
+                f"{display}: document {chapter_id!r} is not present in the bundle"
+            )
+        from .document_bundle import read_current_document_bytes
+
+        return read_current_document_bytes(path)
     if path.is_dir():
         manifest_bytes = _read_directory_file(
             path,
@@ -770,6 +791,11 @@ def read_current_chapter_bytes(source: str | Path, chapter_id: str) -> bytes:
         if len(data) > _MAX_CHAPTER_BYTES:
             _invalid(display, f"ZIP chapter {entry['path']!r} exceeds the size limit")
         return data
+
+
+def read_current_chapter_bytes(source: str | Path, chapter_id: str) -> bytes:
+    """Compatibility alias for :func:`read_current_section_bytes`."""
+    return read_current_section_bytes(source, chapter_id)
 
 
 def validate_book_bundle(source: str | Path) -> None:

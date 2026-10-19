@@ -8,7 +8,7 @@ from typing import Any
 
 import ttsready
 
-from ..bundle import read_current_chapter_bytes
+from ..bundle import read_current_section_bytes
 from ..errors import AnalysisCacheError, ContextLookupError
 from .cache import AnalysisCache
 from .fingerprints import sha256_bytes
@@ -45,7 +45,7 @@ def lookup_context(
     if section_entry is None:
         raise AnalysisCacheError(f"cached change {change_id!r} references an unselected section")
     try:
-        current_bytes = read_current_chapter_bytes(source, section_id)
+        current_bytes = read_current_section_bytes(source, section_id)
     except Exception as exc:
         raise ContextLookupError(
             f"Analysis cache is stale for {section_id}. "

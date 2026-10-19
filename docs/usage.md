@@ -77,6 +77,21 @@ Book output format is inferred only from `.ssmdbook` (directory) and `.ssmdbook.
 
 Use `ssmdconvert book metadata BUNDLE` to display validated metadata stored in either a directory or ZIP bundle. Add `--json` for a deterministic `{"metadata": ...}` object. The human form labels absent known values as `not set` and renders nested values indented.
 
+## Single-document workspaces
+
+Use `document convert` to create a managed single-document workspace without changing the standalone behavior of top-level `convert`:
+
+```bash
+ssmdconvert document convert story.ssmd.md
+ssmdconvert document convert story.ssmd.md -o reviewed.ssmdoc.zip
+ssmdconvert document metadata reviewed.ssmdoc.zip --json
+ssmdconvert document validate reviewed.ssmdoc
+ssmdconvert document refresh reviewed.ssmdoc --check
+ssmdconvert document pack reviewed.ssmdoc -o reviewed.ssmdoc.zip
+```
+
+Directory `.ssmdoc` workspaces are editable; ZIP artifacts are strict and portable. A valid SSMD source is preserved byte-for-byte when no metadata override is requested. Dirty workspaces can be analyzed using current valid text, refreshed explicitly, or packed without modifying the workspace. See [Single-document SSMD workspaces](documents.md) and [`.ssmdoc` bundle format](document-bundle-format.md) for details.
+
 ## SSMD analysis and speech commands
 
 Use the shared SSMD-aware analysis commands for reports, context lookup, prepared TXT, and speech write-back:

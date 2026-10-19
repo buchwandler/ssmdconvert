@@ -16,9 +16,10 @@ spokenform → ttsready → ssmdconvert
 and QA; `ssmdconvert` owns SSMD application semantics and write-back. `ssmdconvert`
 depends directly on the public `ttsready` API, not on `spokenform`.
 
-The commands accept a standalone `.ssmd`/`.ssmd.md` file, a validated
-`.ssmdbook.zip`, or an editable `.ssmdbook/` directory workspace. Chapter selectors
-are original 1-based source chapter numbers and preserve source order.
+The commands accept standalone `.ssmd`/`.ssmd.md` files, validated `.ssmdbook.zip`
+or `.ssmdoc.zip` artifacts, and editable `.ssmdbook/` or `.ssmdoc/` directories.
+Book selectors use original 1-based source chapter numbers and preserve source
+order; a document bundle exposes the single section `document-0001`.
 
 ## Python API and cache boundary
 
@@ -148,12 +149,12 @@ edits, and preserves visible text. Existing authoritative SSMD speech semantics
 are not duplicated. Unresolved effective language or unsafe mapping prevents
 write-back.
 
-Speech writes require a new destination by default. Standalone SSMD and book
+Speech writes require a new destination by default. Standalone SSMD, book, and document
 outputs are written atomically, existing destinations require `--force`, and the
 input cannot be overwritten even with `--force`. Dirty directory workspaces are
 read as-is, but output must be outside the source workspace; selected chapters
 are updated in the new bundle while unselected chapters remain unchanged. For
-bundle destinations use `.ssmdbook` for a directory or `.ssmdbook.zip` for a ZIP,
+bundle destinations use `.ssmdbook`/`.ssmdoc` for a directory or `.ssmdbook.zip`/`.ssmdoc.zip` for a ZIP,
 or pass `--format directory|zip`.
 
 ## Cache and data handling

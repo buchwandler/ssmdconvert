@@ -352,7 +352,9 @@ def analyze_ssmd_source(
         preparation = prepared_result
 
     issues = [*extracted.issues, *fallback_issues]
+    dirty_label = "document" if loaded.kind == "ssmdoc" else "chapters"
     if loaded.workspace_status == "dirty":
+        dirty_value = ", ".join(loaded.dirty_chapters)
         issues.append(
             SsmdAnalysisIssue(
                 code="workspace.dirty",
@@ -363,9 +365,7 @@ def analyze_ssmd_source(
                 clean_end=None,
                 raw_source_start=None,
                 raw_source_end=None,
-                message=(
-                    f"Directory workspace has edited chapters: {', '.join(loaded.dirty_chapters)}"
-                ),
+                message=f"Directory workspace has edited {dirty_label}: {dirty_value}",
                 origin="workspace",
             )
         )

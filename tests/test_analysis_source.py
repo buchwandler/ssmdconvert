@@ -10,7 +10,9 @@ from ssmdconvert import Book, BookChapter, SourceInfo, write_book_bundle
 from ssmdconvert.analysis import load_ssmd_source, select_sections
 from ssmdconvert.analysis.fingerprints import content_fingerprint, sha256_file
 from ssmdconvert.analysis.source import loaded_source_from_book
+from ssmdconvert.document_bundle import write_document_bundle
 from ssmdconvert.errors import AnalysisSourceError
+from ssmdconvert.models import SsmdDocument
 
 
 def _ssmd(title: str, body: str) -> str:
@@ -120,7 +122,7 @@ def test_invalid_source_manifest_is_reported_as_source_error(tmp_path: Path) -> 
     invalid.mkdir()
     (invalid / "manifest.json").write_text("{", encoding="utf-8")
 
-    with pytest.raises(AnalysisSourceError, match="could not load SSMD book workspace"):
+    with pytest.raises(AnalysisSourceError, match="could not inspect SSMD workspace"):
         load_ssmd_source(invalid)
 
 
@@ -197,3 +199,105 @@ def test_loaded_source_from_book_supports_conversion_time_books(tmp_path: Path) 
     assert [section.id for section in source.sections] == ["chapter-0005", "chapter-0002"]
     assert [section.source_number for section in source.sections] == [5, 2]
     assert source.sections[0].ssmd == book.chapters[0].ssmd
+
+
+def _document_bundle(tmp_path: Path, *, format: str = "directory") -> Path:
+    source_bytes = b"original source bytes"
+    document = SsmdDocument(
+        source=SourceInfo(format="ssmd", media_type="text/markdown", name="story.ssmd.md"),
+        metadata={"title": "Story", "language": "en-US"},
+        ssmd=_ssmd("Story", "Measure 5 kg."),
+        source_sha256=hashlib.sha256(source_bytes).hexdigest(),
+    )
+    suffix = ".ssmdoc" if format == "directory" else ".ssmdoc.zip"
+    return write_document_bundle(
+        document,
+        tmp_path / f"story{suffix}",
+        format=format,  # type: ignore[arg-type]
+    )
+
+
+def test_document_directory_and_zip_load_as_single_ssmdoc_section(tmp_path: Path) -> None:
+    directory = _document_bundle(tmp_path)
+    archive = _document_bundle(tmp_path, format="zip")
+
+    source = load_ssmd_source(directory)
+    zipped = load_ssmd_source(archive)
+
+    assert source.kind == source.input_format == "ssmdoc"
+    assert source.workspace_type == "directory"
+    assert source.workspace_status == "clean"
+    assert source.sections[0].id == "document-0001"
+    assert source.sections[0].source_number == 1
+    assert source.sections[0].title == "Story"
+    assert len(source.sections) == 1
+    assert zipped.kind == "ssmdoc"
+    assert zipped.workspace_type == "zip"
+    assert zipped.source_sha256 == hashlib.sha256(archive.read_bytes()).hexdigest()
+    assert (
+        zipped.sections[0].chapter_sha256
+        == hashlib.sha256(source.sections[0].ssmd.encode("utf-8")).hexdigest()
+    )
+
+
+def test_dirty_document_workspace_uses_current_text_and_front_matter(tmp_path: Path) -> None:
+    workspace = _document_bundle(tmp_path)
+    document_path = workspace / "document.ssmd.md"
+    document_path.write_text(_ssmd("Edited title", "Current edited text."), encoding="utf-8")
+
+    source = load_ssmd_source(workspace)
+
+    assert source.workspace_status == "dirty"
+    assert source.dirty_chapters == ("document-0001",)
+    assert source.title == "Edited title"
+    assert source.sections[0].ssmd.endswith("Current edited text.\n")
+    assert (
+        source.sections[0].chapter_sha256 == hashlib.sha256(document_path.read_bytes()).hexdigest()
+    )
+
+
+def test_dot_loads_document_workspace_from_its_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = _document_bundle(tmp_path)
+    monkeypatch.chdir(workspace)
+
+    source = load_ssmd_source(".")
+
+    assert source.path == workspace.resolve()
+    assert source.kind == "ssmdoc"
+    assert source.sections[0].id == "document-0001"
+
+
+def test_generic_report_txt_context_and_speech_audit_accept_ssmdoc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from ssmdconvert.cli import app
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache-home"))
+    workspace = _document_bundle(tmp_path)
+    runner = CliRunner()
+
+    report = runner.invoke(app, ["report", str(workspace), "--format", "json"])
+    assert report.exit_code == 0, report.output
+    payload = json.loads(report.output)
+    assert payload["source"]["input_format"] == "ssmdoc"
+    assert payload["section_stats"][0]["section_id"] == "document-0001"
+    assert (
+        "Dirty document: none"
+        in runner.invoke(app, ["report", str(workspace), "--format", "md"]).output
+    )
+
+    text = runner.invoke(app, ["txt", str(workspace), "--chapters", "1"])
+    assert text.exit_code == 0, text.output
+    assert "five kilograms" in text.output
+
+    speech = runner.invoke(app, ["speech", "audit", str(workspace), "--json"])
+    assert speech.exit_code == 0, speech.output
+
+    change_id = payload["changes"][0]["id"]
+    context = runner.invoke(app, ["context", str(workspace), change_id, "--json"])
+    assert context.exit_code == 0, context.output
+    assert json.loads(context.output)["change"]["section_id"] == "document-0001"

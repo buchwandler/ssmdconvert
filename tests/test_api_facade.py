@@ -126,3 +126,21 @@ def test_public_api_is_explicit_and_does_not_retain_ambiguous_convert_alias() ->
     assert "convert_document" in ssmdconvert.__all__
     assert "convert" not in ssmdconvert.__all__
     assert ssmdconvert.convert_document is convert_document
+
+
+def test_document_workspace_api_is_public() -> None:
+    names = (
+        "SsmdDocument",
+        "convert_document_artifact",
+        "DocumentWorkspace",
+        "WorkspaceDocumentStatus",
+        "DocumentBundleError",
+        "DocumentBundleValidationError",
+        "write_document_bundle",
+        "load_document_bundle",
+        "load_document_workspace",
+        "refresh_document_workspace",
+        "validate_document_bundle",
+    )
+    assert set(names) <= set(ssmdconvert.__all__)
+    assert all(getattr(ssmdconvert, name) is not None for name in names)

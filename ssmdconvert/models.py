@@ -97,6 +97,38 @@ class BookWorkspace:
 
 
 @dataclass(frozen=True, slots=True)
+class SsmdDocument:
+    """One rendered SSMD artifact plus original-source provenance."""
+
+    source: SourceInfo
+    metadata: Mapping[str, Any]
+    ssmd: str
+    source_sha256: str
+    speech_semantics: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceDocumentStatus:
+    """Recorded and current digest state for an editable document workspace."""
+
+    id: str
+    path: str
+    expected_sha256: str
+    actual_sha256: str
+    dirty: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentWorkspace:
+    """An editable single-document directory bundle and its current state."""
+
+    path: Path
+    document: SsmdDocument
+    status: WorkspaceDocumentStatus
+    dirty: bool
+
+
+@dataclass(frozen=True, slots=True)
 class BookInspectionChapter:
     """Inventory metadata for one source chapter."""
 

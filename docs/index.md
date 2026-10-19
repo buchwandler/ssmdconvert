@@ -45,6 +45,8 @@ speech-annotations
 freeze
 analysis-cache
 migration-from-ttsready-cli
+documents
+document-bundle-format
 books
 bundle-format
 api

@@ -47,7 +47,14 @@ from .bundle import (
 )
 from .cli_help import AdaptiveTyper, AdaptiveTyperGroup
 from .converter import Converter
-from .errors import BookError, SSMDConvertError
+from .document_bundle import (
+    load_document_bundle,
+    load_document_workspace,
+    refresh_document_workspace,
+    validate_document_bundle,
+    write_document_bundle,
+)
+from .errors import BookError, DocumentBundleError, SSMDConvertError
 from .linguistics import SpacyPolicy
 from .metadata import load_metadata_file
 from .options import (
@@ -59,6 +66,7 @@ from .options import (
 )
 from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SpeechSemanticsMode
 from .progress import ProgressCallback, ProgressEvent
+from .services.document_conversion import convert_document_artifact
 from .speech.failures import SpeechFreezeFailure
 from .speech.provenance import build_speech_provenance
 from .speech.workflows import summarize_changes
@@ -82,6 +90,14 @@ book_app = AdaptiveTyper(
     help="Inspect and convert EPUB books.",
 )
 app.add_typer(book_app, name="book")
+document_app = AdaptiveTyper(
+    cls=AdaptiveTyperGroup,
+    add_completion=False,
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    help="Convert and manage single-document SSMD workspaces.",
+)
+app.add_typer(document_app, name="document")
 speech_app = AdaptiveTyper(
     cls=AdaptiveTyperGroup,
     add_completion=False,
@@ -460,6 +476,39 @@ def _book_output_format(
     )
 
 
+def _default_document_bundle_path(source: Path) -> Path:
+    lower = source.name.lower()
+    if lower.endswith(".ssmd.md"):
+        base = source.name[: -len(".ssmd.md")]
+    elif lower.endswith(".ssmd"):
+        base = source.name[: -len(".ssmd")]
+    else:
+        base = source.stem
+    return source.with_name(f"{base}.ssmdoc")
+
+
+def _document_output_format(
+    destination: Path,
+    requested: str | None,
+) -> Literal["directory", "zip"]:
+    if requested is not None:
+        normalized = requested.lower()
+        if normalized == "directory":
+            return "directory"
+        if normalized == "zip":
+            return "zip"
+        raise typer.BadParameter("--format must be 'directory' or 'zip'")
+    name = destination.name.lower()
+    if name.endswith(".ssmdoc.zip"):
+        return "zip"
+    if name.endswith(".ssmdoc"):
+        return "directory"
+    raise typer.BadParameter(
+        "cannot infer document bundle format from this output name; "
+        "pass --format directory or --format zip"
+    )
+
+
 def _speech_materialize_to_destination(
     source: Path,
     output: Path,
@@ -492,14 +541,14 @@ def _speech_materialize_to_destination(
         ),
         on_progress=on_progress,
     )
-    if bundle_format is not None and analysis.source.kind != "ssmdbook":
-        raise ValueError("--format is only valid when writing an SSMD book bundle")
+    if bundle_format is not None and analysis.source.kind not in {"ssmdbook", "ssmdoc"}:
+        raise ValueError("--format is only valid when writing an SSMD book or document bundle")
 
-    if analysis.source.kind == "ssmdbook" and source.is_dir():
+    if analysis.source.kind in {"ssmdbook", "ssmdoc"} and source.is_dir():
         workspace_root = source.resolve(strict=True)
         if destination.resolve(strict=False).is_relative_to(workspace_root):
             raise ValueError("bundle output must be outside the source workspace")
-    from .bundle import read_current_chapter_bytes
+    from .bundle import read_current_section_bytes
 
     try:
         frozen = freeze_speech_api(analysis)
@@ -518,11 +567,11 @@ def _speech_materialize_to_destination(
         raise
 
     for section in analysis.sections:
-        current = _canonical_ssmd_bytes(read_current_chapter_bytes(source, section.id))
+        current = _canonical_ssmd_bytes(read_current_section_bytes(source, section.id))
         expected = _canonical_ssmd_bytes(section.ssmd.encode("utf-8"))
         if current != expected:
             raise ValueError(
-                f"source chapter {section.id} changed during speech materialization; "
+                f"source section {section.id} changed during speech materialization; "
                 "no output was written"
             )
 
@@ -533,6 +582,36 @@ def _speech_materialize_to_destination(
             destination,
             source=source,
             force=force,
+        )
+    elif analysis.source.kind == "ssmdoc":
+        if source.is_dir():
+            document = load_document_workspace(source).document
+        else:
+            document = load_document_bundle(source)
+        if len(analysis.sections) != 1 or analysis.sections[0].id != "document-0001":
+            raise ValueError("SSMD document analysis did not contain document-0001")
+        section = analysis.sections[0]
+        current_document = _canonical_ssmd_bytes(document.ssmd.encode("utf-8"))
+        expected_document = _canonical_ssmd_bytes(section.ssmd.encode("utf-8"))
+        if current_document != expected_document:
+            raise ValueError(
+                "source document changed during speech materialization; no output was written"
+            )
+        updated_document = replace(
+            document,
+            ssmd=frozen.sections.get(section.id, document.ssmd),
+            metadata=analysis.source.metadata,
+            speech_semantics=build_speech_provenance(
+                analysis,
+                source_sha256=document.source_sha256,
+            ),
+        )
+        selected_format = _document_output_format(destination, bundle_format)
+        write_document_bundle(
+            updated_document,
+            destination,
+            format=selected_format,
+            overwrite=force,
         )
     else:
         if source.is_dir():
@@ -587,9 +666,10 @@ def _speech_materialize_to_destination(
         if json_output:
             failed_outputs.append("freeze report could not be written to stdout")
         requested = " and ".join(failed_outputs) or "requested report output failed"
-        raise BookError(
-            f"SSMD speech artifact was published at {destination}, but {requested}: {exc}"
-        ) from exc
+        message = f"SSMD speech artifact was published at {destination}, but {requested}: {exc}"
+        if analysis.source.kind == "ssmdoc":
+            raise DocumentBundleError(message) from exc
+        raise BookError(message) from exc
     return destination, report
 
 
@@ -1395,5 +1475,193 @@ def book_validate(
             typer.echo(json.dumps({"valid": True, "bundle": str(bundle)}, ensure_ascii=False))
             return
         typer.echo(f"Valid book bundle: {bundle}")
+
+    _run_with_domain_errors(run)
+
+
+@document_app.command("convert")  # type: ignore[untyped-decorator]
+def document_convert(
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    metadata_file: Annotated[
+        Path | None,
+        typer.Option("--metadata-file", help="YAML file with structured metadata overrides."),
+    ] = None,
+    title: Annotated[str | None, typer.Option("--title")] = None,
+    author: Annotated[str | None, typer.Option("--author")] = None,
+    language: Annotated[str | None, typer.Option("-l", "--language")] = None,
+    sequence_fallback_mode: Annotated[
+        SequenceFallbackModeOption | None,
+        typer.Option("--sequence-fallback-mode"),
+    ] = None,
+    bundle_format: Annotated[str | None, typer.Option("--format")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
+) -> None:
+    """Convert a supported source into an editable single-document SSMD workspace."""
+
+    def run() -> None:
+        destination = output or _default_document_bundle_path(source)
+        resolved_destination = _output_path(destination)
+        _reject_input_overwrite(source, resolved_destination)
+        selected_format = _document_output_format(destination, bundle_format)
+        metadata_overrides = (
+            load_metadata_file(metadata_file) if metadata_file is not None else None
+        )
+        document = convert_document_artifact(
+            source,
+            title=title,
+            author=author,
+            language=language,
+            metadata_overrides=metadata_overrides,
+            sequence_fallback_mode=(
+                sequence_fallback_mode.value if sequence_fallback_mode is not None else None
+            ),
+        )
+        written = write_document_bundle(
+            document,
+            destination,
+            format=selected_format,
+            overwrite=force,
+        )
+        typer.echo(f"Created SSMD document bundle: {written}")
+
+    _run_with_domain_errors(run)
+
+
+@document_app.command("inspect")  # type: ignore[untyped-decorator]
+def document_inspect(
+    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Inspect a supported source document before conversion."""
+
+    def run() -> None:
+        converter = Converter()
+        adapter = converter.adapter_for(source)
+        document = inspect_document(source)
+        payload = {
+            "source": str(source),
+            "adapter": adapter.name,
+            "metadata": dict(document.metadata),
+            "sections": [
+                {
+                    "id": section.id,
+                    "title": section.title,
+                    "chars": len(section.markdown),
+                    "source_ref": section.source_ref,
+                }
+                for section in document.sections
+            ],
+        }
+        if json_output:
+            typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+            return
+        typer.echo(f"Adapter: {adapter.name}")
+        typer.echo(f"Sections: {len(document.sections)}")
+        for section in document.sections:
+            typer.echo(
+                f"  {section.id}: {section.title or '(untitled)'} ({len(section.markdown)} chars)"
+            )
+
+    _run_with_domain_errors(run)
+
+
+@document_app.command("metadata")  # type: ignore[untyped-decorator]
+def document_metadata(
+    bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Display metadata from a document workspace or ZIP bundle."""
+
+    def run() -> None:
+        if bundle.is_dir():
+            workspace = load_document_workspace(bundle)
+            document = workspace.document
+            workspace_lines = [
+                "Workspace: directory",
+                f"Status: {'dirty' if workspace.dirty else 'clean'}",
+                f"Dirty document: {int(workspace.dirty)}",
+            ]
+        else:
+            document = load_document_bundle(bundle)
+            workspace_lines = ["Workspace: no", "Status: valid"]
+        if json_output:
+            typer.echo(
+                json.dumps(
+                    {"metadata": dict(document.metadata)},
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+            )
+            return
+        typer.echo("\n".join(workspace_lines) + "\n\n" + _render_stored_metadata(document.metadata))
+
+    _run_with_domain_errors(run)
+
+
+@document_app.command("refresh")  # type: ignore[untyped-decorator]
+def document_refresh(
+    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    check: Annotated[bool, typer.Option("--check")] = False,
+) -> None:
+    """Refresh a document workspace manifest, or check whether it is clean."""
+
+    def run() -> None:
+        if check:
+            current = load_document_workspace(workspace)
+            if current.dirty:
+                typer.echo(f"Workspace dirty: {workspace}", err=True)
+                typer.echo("Dirty document: 1", err=True)
+                raise typer.Exit(code=1)
+            typer.echo(f"Workspace clean: {workspace}")
+            return
+        current = load_document_workspace(workspace)
+        changed_digest = int(current.dirty)
+        refresh_document_workspace(workspace)
+        typer.echo(f"Refreshed {workspace}")
+        typer.echo(f"Changed digest: {changed_digest}")
+        typer.echo("Status: clean")
+
+    _run_with_domain_errors(run)
+
+
+@document_app.command("pack")  # type: ignore[untyped-decorator]
+def document_pack(
+    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    output: Annotated[Path, typer.Option("--output", "-o")],
+    force: Annotated[bool, typer.Option("--force", help="Replace an existing ZIP bundle.")] = False,
+) -> None:
+    """Pack current valid workspace content into a strict portable ZIP."""
+
+    def run() -> None:
+        current = load_document_workspace(workspace)
+        destination = _output_path(output)
+        _reject_input_overwrite(workspace, destination)
+        written = write_document_bundle(
+            current.document,
+            destination,
+            format="zip",
+            overwrite=force,
+        )
+        typer.echo(f"Packed SSMD document ZIP: {written}")
+
+    _run_with_domain_errors(run)
+
+
+@document_app.command("validate")  # type: ignore[untyped-decorator]
+def document_validate(
+    bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validate a directory or ZIP SSMD document bundle."""
+
+    def run() -> None:
+        validate_document_bundle(bundle)
+        if json_output:
+            typer.echo(json.dumps({"valid": True, "bundle": str(bundle)}, ensure_ascii=False))
+            return
+        typer.echo(f"Valid document bundle: {bundle}")
 
     _run_with_domain_errors(run)

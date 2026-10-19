@@ -60,6 +60,34 @@ available for callers that need adapter control.
 :members:
 ```
 
+## Rendered SSMD document workspaces
+
+`SsmdDocument` represents a rendered SSMD artifact with source provenance; it is distinct from the normalized source-neutral `Document`. `convert_document_artifact()` builds the artifact, and publication remains explicit through `write_document_bundle()`:
+
+```python
+from ssmdconvert import (
+    DocumentWorkspace,
+    SsmdDocument,
+    WorkspaceDocumentStatus,
+    convert_document_artifact,
+    load_document_bundle,
+    load_document_workspace,
+    refresh_document_workspace,
+    validate_document_bundle,
+    write_document_bundle,
+)
+
+artifact: SsmdDocument = convert_document_artifact("story.ssmd.md")
+write_document_bundle(artifact, "story.ssmdoc", format="directory")
+loaded: SsmdDocument = load_document_bundle("story.ssmdoc")
+workspace: DocumentWorkspace = load_document_workspace("story.ssmdoc")
+status: WorkspaceDocumentStatus = workspace.status
+refreshed = refresh_document_workspace("story.ssmdoc")
+validate_document_bundle("story.ssmdoc")
+```
+
+`load_document_bundle()` strictly loads a directory or ZIP. `load_document_workspace()` accepts only a directory and returns current valid SSMD even when the recorded digest is stale; it reports dirty state without rewriting the manifest. See [Single-document SSMD workspaces](documents.md) for the CLI lifecycle and [`.ssmdoc` bundle format](document-bundle-format.md) for integrity and security rules.
+
 ## EPUB books
 
 `convert_book()` returns `BookConversionResult`, not a bare `Book`. The result
@@ -123,7 +151,7 @@ Failed freezes raise `SpeechFreezeFailure` with structured partial evidence.
 
 ## SSMD analysis, reports, and TXT
 
-`analyze_ssmd()` accepts standalone SSMD, a validated SSMD book/workspace path,
+`analyze_ssmd()` accepts standalone SSMD, a validated `.ssmdbook` or `.ssmdoc` bundle/workspace path,
 or an in-memory `Book` or `BookConversionResult`. In-memory books are adapted
 with `loaded_source_from_book`; analysis does not write a temporary bundle.
 Analysis and projection are separate, so a report can reuse the exact projection
