@@ -233,7 +233,7 @@ def read_current_bundle_item_bytes(source: str | Path, item_id: str) -> bytes:
     assert isinstance(document_workspace, DocumentWorkspace)
     if item_id != "document-0001":
         raise BundleIdentityError(f"{root}: item {item_id!r} is not present in the bundle")
-    return document_workspace.document.ssmd.encode("utf-8")
+    return (root / document_workspace.status.path).read_bytes()
 
 
 __all__ = [

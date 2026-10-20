@@ -151,7 +151,7 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
                 workspace_type="directory",
                 workspace_status="dirty" if document_workspace.dirty else "clean",
                 dirty=document_workspace.dirty,
-                actual_sha256=document_workspace.status.actual_sha256,
+                actual_sha256=sha256_file(path / document_workspace.status.path),
             )
         book_workspace = workspace.value
         assert isinstance(book_workspace, BookWorkspace)
