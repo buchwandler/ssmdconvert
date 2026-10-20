@@ -1,41 +1,39 @@
-# ssmdconvert Documentation
+# SSMDConvert User Guide
 
-`ssmdconvert` converts common local documents and EPUB books into SSMD 0.9. The
-base package supports text, Markdown, HTML, EPUB, SSMD analysis, and speech
-audit/annotation. PDF and DOCX adapters are optional extras; the public `ttsready`
-preparation API is a core dependency.
+SSMDConvert converts local documents and EPUB books into SSMD 0.9, then provides
+analysis, reporting, plain-text projection, and safe speech write-back. The common
+bundle lifecycle stores books and documents in canonical directory workspaces or
+read-only ZIP archives.
 
-Convert a document:
-
-```bash
-ssmdconvert convert manuscript.md -o manuscript.ssmd
-```
-
-Inspect EPUB chapters or create a chapter-aware bundle:
+## Quick start
 
 ```bash
-ssmdconvert book inspect novel.epub --json
-ssmdconvert book convert novel.epub -o novel.ssmdbook
-ssmdconvert book validate novel.ssmdbook
+ssmdconvert bundle inspect novel.epub --json
+ssmdconvert bundle convert novel.epub --chapters 2-20 -o novel.ssmd-bundle
+ssmdconvert bundle convert notes.md -o notes.ssmd-bundle
+ssmdconvert bundle validate novel.ssmd-bundle
 ```
 
-The CLI refuses to overwrite existing output unless `--force` is supplied. Output writes are atomic, and forced directory-bundle writes replace the complete prior bundle.
+Use `ssmdconvert bundle metadata`, `refresh`, `pack`, and `validate` to manage an
+editable workspace and its archive. The manifest identifies the content kind;
+see [Bundle workspaces](bundles.md) for the complete lifecycle.
 
 ## Ownership boundary
 
-`ssmdconvert` owns source ingestion, canonical SSMD conversion, chapter identity,
-`.ssmdbook` integrity, SSMD reports/context/TXT projection, and safe speech
-write-back. `ttsready` supplies generic preparation and QA through its public Python
-API; it is not a user-facing CLI or a source of SSMD-specific storage semantics.
-`ssmdconvert` uses one analysis pipeline for reports and speech workflows and never
-mutates a directory workspace in place.
+SSMDConvert owns source ingestion, SSMD semantics, chapter identity, analysis,
+reporting, text projection, and safe write-back. It uses the public `ttsready`
+Python API for source-neutral speech preparation and QA; it does not rely on a
+separate downstream CLI.
 
 ```{toctree}
 :maxdepth: 2
 :caption: User guide
 
 installation
+bundles
 usage
+books
+documents
 analysis-workflows
 report
 context
@@ -45,11 +43,8 @@ speech-annotations
 freeze
 analysis-cache
 migration-from-ttsready-cli
-documents
-document-bundle-format
-books
-bundle-format
 api
-migration-to-v0.2
+bundle-format
+document-bundle-format
 changelog
 ```

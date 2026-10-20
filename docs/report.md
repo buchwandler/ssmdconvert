@@ -5,7 +5,7 @@ projection used by the other analysis commands.
 
 ```bash
 ssmdconvert report SOURCE
-ssmdconvert report BOOK.ssmdbook.zip --chapters 1,3-5 --format json -o report.json
+ssmdconvert report BOOK.ssmd-bundle.zip --chapters 1,3-5 --format json -o report.json
 ssmdconvert report SOURCE --refresh --fail-on-warning
 ```
 

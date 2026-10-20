@@ -37,8 +37,8 @@ class LoadedSsmdSource:
     """Validated SSMD content plus application-level source/workspace identity."""
 
     path: Path
-    kind: Literal["ssmd", "ssmdoc", "ssmdbook"]
-    input_format: Literal["ssmd", "ssmdoc", "ssmdbook"]
+    kind: Literal["ssmd", "bundle"]
+    input_format: Literal["ssmd", "ssmd-bundle"]
     title: str | None
     metadata: Mapping[str, Any]
     sections: tuple[LoadedSsmdSection, ...]
@@ -47,6 +47,7 @@ class LoadedSsmdSource:
     workspace_type: WorkspaceType
     workspace_status: WorkspaceStatus
     dirty_chapters: tuple[str, ...] = ()
+    bundle_kind: Literal["book", "document"] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +137,8 @@ class SsmdAnalysis:
 @dataclass(frozen=True, slots=True)
 class SourceReport:
     path: str
+    kind: Literal["ssmd", "bundle"]
+    bundle_kind: Literal["book", "document"] | None
     input_format: str
     title: str | None
     source_sha256: str

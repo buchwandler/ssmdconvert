@@ -13,11 +13,8 @@ import pytest
 from epub_support import make_epub
 from ssmd import parse_structure
 
-from ssmdconvert import (
-    BookBundleError,
-    BookBundleValidationError,
-    BookWorkspace,
-    WorkspaceChapterStatus,
+from ssmdconvert import BookWorkspace, WorkspaceChapterStatus
+from ssmdconvert._book_bundle import (
     load_book_bundle,
     load_book_workspace,
     refresh_book_workspace,
@@ -25,6 +22,7 @@ from ssmdconvert import (
     write_book_bundle,
 )
 from ssmdconvert.books import convert_book
+from ssmdconvert.errors import BookBundleError, BookBundleValidationError
 
 
 def _book(tmp_path: Path):
@@ -36,7 +34,7 @@ def _book(tmp_path: Path):
 
 def _write_directory(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     _source, book = _book(tmp_path)
-    directory = write_book_bundle(book, tmp_path / "book.ssmdbook", format="directory")
+    directory = write_book_bundle(book, tmp_path / "book.ssmd-bundle", format="directory")
     return directory, json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
 
 
@@ -85,8 +83,8 @@ def _assert_same_book(expected: Any, actual: Any) -> None:
 
 def test_directory_and_zip_roundtrip_and_equivalence(tmp_path: Path) -> None:
     source, book = _book(tmp_path)
-    directory = write_book_bundle(book, tmp_path / "book.ssmdbook", format="directory")
-    archive = write_book_bundle(book, tmp_path / "book.ssmdbook.zip", format="zip")
+    directory = write_book_bundle(book, tmp_path / "book.ssmd-bundle", format="directory")
+    archive = write_book_bundle(book, tmp_path / "book.ssmd-bundle.zip", format="zip")
 
     from_directory = load_book_bundle(directory)
     from_archive = load_book_bundle(archive)
@@ -109,7 +107,11 @@ def test_directory_and_zip_roundtrip_and_equivalence(tmp_path: Path) -> None:
             assert zip_file.read(path) == (directory / path).read_bytes()
 
     assert from_directory.source_sha256 == hashlib.sha256(source.read_bytes()).hexdigest()
-    repacked = write_book_bundle(from_directory, tmp_path / "repacked.ssmdbook.zip", format="zip")
+    repacked = write_book_bundle(
+        from_directory,
+        tmp_path / "repacked.ssmd-bundle.zip",
+        format="zip",
+    )
     assert load_book_bundle(repacked).chapters == from_directory.chapters
 
 
@@ -128,7 +130,7 @@ def test_speech_semantics_provenance_roundtrips_in_both_bundle_formats(tmp_path:
 
     for label, book in (("complete", complete_book), ("preserved", preserved_book)):
         for bundle_format in ("directory", "zip"):
-            suffix = ".ssmdbook" if bundle_format == "directory" else ".ssmdbook.zip"
+            suffix = ".ssmd-bundle" if bundle_format == "directory" else ".ssmd-bundle.zip"
             output = tmp_path / f"{label}-{bundle_format}{suffix}"
             bundle = write_book_bundle(book, output, format=bundle_format)
             loaded = load_book_bundle(bundle)
@@ -142,7 +144,7 @@ def test_source_hash_is_captured_before_bundle_write(tmp_path: Path) -> None:
     original_hash = book.source_sha256
     source.write_bytes(b"mutated source")
 
-    bundle = write_book_bundle(book, tmp_path / "captured.ssmdbook", format="directory")
+    bundle = write_book_bundle(book, tmp_path / "captured.ssmd-bundle", format="directory")
     manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
 
     assert manifest["source"]["sha256"] == original_hash
@@ -166,7 +168,7 @@ def test_bundle_roundtrip_preserves_source_and_canonical_parent_ids(tmp_path: Pa
     source = tmp_path / "nested.epub"
     make_epub(source, nested_navigation=True)
     book = convert_book(source)
-    directory = write_book_bundle(book, tmp_path / "nested.ssmdbook", format="directory")
+    directory = write_book_bundle(book, tmp_path / "nested.ssmd-bundle", format="directory")
 
     loaded = load_book_bundle(directory)
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
@@ -218,7 +220,7 @@ def test_failed_zip_overwrite_preserves_existing_output(tmp_path: Path, monkeypa
     _source, book = _book(tmp_path)
     output = write_book_bundle(book, tmp_path / "existing.zip", format="zip")
     original = output.read_bytes()
-    bundle_module = importlib.import_module("ssmdconvert.bundle")
+    bundle_module = importlib.import_module("ssmdconvert._book_bundle")
 
     def fail_write(*_args: Any, **_kwargs: Any) -> None:
         raise OSError("simulated write failure")
@@ -240,7 +242,7 @@ def test_failed_directory_overwrite_preserves_existing_tree(
     original_manifest = (output / "manifest.json").read_bytes()
     stale = output / "stale-file"
     stale.write_text("keep until replacement succeeds", encoding="utf-8")
-    bundle_module = importlib.import_module("ssmdconvert.bundle")
+    bundle_module = importlib.import_module("ssmdconvert._book_bundle")
 
     def fail_write(*_args: Any, **_kwargs: Any) -> None:
         raise OSError("simulated directory write failure")
@@ -263,7 +265,7 @@ def test_bundle_enforces_manifest_and_chapter_size_limits(
     _source, book = _book(tmp_path)
     output = tmp_path / ("limited" if format == "directory" else "limited.zip")
     bundle = write_book_bundle(book, output, format=format)  # type: ignore[arg-type]
-    bundle_module = importlib.import_module("ssmdconvert.bundle")
+    bundle_module = importlib.import_module("ssmdconvert._book_bundle")
 
     monkeypatch.setattr(bundle_module, "_MAX_MANIFEST_BYTES", 1)
     with pytest.raises(BookBundleValidationError, match="size limit"):
@@ -284,7 +286,7 @@ def test_bundle_enforces_total_chapter_size_limit(
     _source, book = _book(tmp_path)
     output = tmp_path / ("limited-total" if format == "directory" else "limited-total.zip")
     bundle = write_book_bundle(book, output, format=format)  # type: ignore[arg-type]
-    bundle_module = importlib.import_module("ssmdconvert.bundle")
+    bundle_module = importlib.import_module("ssmdconvert._book_bundle")
 
     monkeypatch.setattr(bundle_module, "_MAX_TOTAL_CHAPTER_BYTES", 1)
     with pytest.raises(BookBundleValidationError, match="total size limit"):
@@ -461,7 +463,9 @@ def test_bundle_roundtrip_preserves_sequence_fallback_mode(tmp_path: Path, forma
     source = tmp_path / "book.epub"
     make_epub(source)
     book = convert_book(source, sequence_fallback_mode="preserve")
-    output = tmp_path / ("preserve.ssmdbook" if format == "directory" else "preserve.ssmdbook.zip")
+    output = tmp_path / (
+        "preserve.ssmd-bundle" if format == "directory" else "preserve.ssmd-bundle.zip"
+    )
 
     bundle = write_book_bundle(book, output, format=format)  # type: ignore[arg-type]
     loaded = load_book_bundle(bundle)
@@ -482,7 +486,7 @@ def test_legacy_bundle_without_policy_and_with_unknown_metadata_remains_valid(
     tmp_path: Path,
 ) -> None:
     _source, book = _book(tmp_path)
-    bundle = write_book_bundle(book, tmp_path / "old.ssmdbook", format="directory")
+    bundle = write_book_bundle(book, tmp_path / "old.ssmd-bundle", format="directory")
     manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
     del manifest["metadata"]["sequence_fallback_mode"]
     manifest["metadata"]["third_party_metadata"] = {"vendor": "sample", "enabled": True}

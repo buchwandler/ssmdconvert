@@ -1,107 +1,36 @@
-# `.ssmdoc` bundle format
+# Document manifest format (implementation detail)
 
-`.ssmdoc` is a versioned single-document artifact, not a one-chapter
-`.ssmdbook`. Its manifest format is `ssmdconvert.document`; the current schema
-version is `1` and the stored document is validated as SSMD `0.9`.
+This page documents the existing single-document manifest carried inside a
+canonical bundle. It is an implementation detail; users manage either source
+kind through the common lifecycle described in [Bundle workspaces](bundles.md).
 
-A directory bundle is the canonical editable workspace:
+The document manifest keeps its existing format identifier and schema version:
 
 ```text
-story.ssmdoc/
-├── manifest.json
-└── document.ssmd.md
+format:         ssmdconvert.document
+schema_version: 1
+ssmd_version:   0.9
 ```
 
-The equivalent portable ZIP has exactly the canonical members `manifest.json`
-and `document.ssmd.md` in that order. ZIP timestamps and member metadata are
-fixed for deterministic output.
+The manifest contains JSON-compatible metadata, source provenance, and one
+canonical document entry with ID `document-0001`, path `document.ssmd.md`,
+character count, and content digest. Manifest JSON is UTF-8 and strict JSON;
+metadata must be JSON-compatible. The source digest is captured during
+conversion, and publication does not reread the source.
 
-## Manifest
+## Validation and workspace behavior
 
-A manifest has this shape (digests abbreviated):
+Strict loading checks manifest fields and versions, canonical paths, source and
+document digest shape and content, UTF-8, and SSMD 0.9 validity. ZIP duplicate
+members, symlinks, unsafe paths, oversized content, and excessive member counts
+are rejected.
 
-```json
-{
-  "format": "ssmdconvert.document",
-  "schema_version": 1,
-  "ssmd_version": "0.9",
-  "metadata": {
-    "title": "Example",
-    "language": "en-US"
-  },
-  "source": {
-    "format": "markdown",
-    "media_type": "text/markdown",
-    "name": "story.md",
-    "sha256": "<64 lowercase hexadecimal characters>"
-  },
-  "document": {
-    "id": "document-0001",
-    "path": "document.ssmd.md",
-    "char_count": 42,
-    "sha256": "<64 lowercase hexadecimal characters>"
-  }
-}
-```
+An editable directory workspace can expose valid current SSMD when its recorded
+digest is stale. It reports expected and actual digests without modifying the
+manifest. `bundle refresh` explicitly updates the digest and character count;
+`bundle pack` writes a strict archive from current valid text without changing
+the source workspace. Unreferenced local files are not portable members.
 
-`metadata` contains effective document metadata without the reserved
-`ssmd_version` key. `source.sha256` is the hash of the original input bytes,
-captured during conversion; bundle publication does not reread the source.
-`document.sha256` hashes the canonical UTF-8 SSMD bytes after normalizing
-line endings to LF, and `char_count` is the Python character count of that
-canonical text. The canonical document identity and path are fixed
-as `document-0001` and `document.ssmd.md`.
-
-An optional `speech_semantics` object stores speech-provenance fields when a
-speech operation has materialized decisions. Its source digest must match
-`source.sha256`. Normal document conversion does not require this field.
-
-Manifest JSON is UTF-8, strict JSON, and serialized deterministically. Metadata
-must be JSON-compatible; NaN and Infinity are rejected.
-
-## Strict bundles and editable workspaces
-
-`load_document_bundle()` and `validate_document_bundle()` strictly verify either
-a directory or ZIP: manifest fields and versions, canonical paths, source digest
-shape, document digest, UTF-8, and SSMD 0.9 validity. A stale document digest
-makes a directory invalid as a strict bundle.
-
-`load_document_workspace()` is the relaxed directory-workspace API. It still
-validates the manifest and safely reads and validates the current document, but
-returns that text when its digest differs and reports the expected digest,
-actual digest, and `dirty` state. It does not change files. ZIP artifacts never
-use relaxed digest handling.
-
-Use `ssmdconvert document refresh WORKSPACE` as the explicit operation that
-updates the manifest digest and character count after editing. `--check` is
-read-only and reports a dirty workspace as a failure. `document pack` creates a
-strict ZIP using current valid text and fresh hashes without refreshing or
-otherwise modifying the source workspace.
-
-## Workspace membership and portable output
-
-- A **portable bundle member** is one of the members defined by this document format: `manifest.json` and `document.ssmd.md`.
-- A **manifest-referenced source member** is the canonical document named by the manifest; it participates in validation, digest checking, and workspace freshness as described above.
-- An **unreferenced editable-workspace file** may exist locally, but is not source content and does not affect workspace validation.
-- A **packed ZIP member** is only a portable format member; packing omits unreferenced local files and directories.
-
-## Path and resource safety
-
-Bundle paths must be normalized relative POSIX paths. Absolute paths, traversal,
-`.`/`..` components, Windows drive paths, backslashes, NUL bytes, symlink
-escapes, duplicate ZIP names, and ZIP symlinks are rejected. The document path
-must equal the canonical path shown above. Directory reads are limited to
-manifest-referenced files; unrelated files do not become bundle content.
-
-The manifest is limited to 2 MiB, the document to 64 MiB, and a ZIP to 10,000
-members. These bounds limit bundle content processed by the loader; they do not
-make parsing a sandbox or guarantee safety against every resource-exhaustion
-attack. Treat bundles as data and use the public validation API.
-
-Writes build and validate a complete temporary artifact before publication.
-Existing destinations are refused by default. With overwrite enabled, a
-complete directory workspace is replaced rather than merged, and ZIP output is
-published atomically. Unreferenced workspace-local files and directories do not affect workspace validation and are never included in portable ZIP output.
-
-See [Single-document SSMD workspaces](documents.md) for CLI usage and the public
-Python API.
+The existing manifest format, schema version, and document path remain
+unchanged by the unified outer artifact name. See [Bundle workspaces](bundles.md)
+for the common user-facing lifecycle.

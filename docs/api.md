@@ -1,206 +1,145 @@
 # Python API
 
-The v0.2 facade is exported from `ssmdconvert` and listed in
-`ssmdconvert.__all__`. Conversion and analysis return in-memory results; writing
-files, bundles, or analysis caches is explicit. The Python migration from the
-pre-0.2 signatures is covered in [Migration to v0.2](migration-to-v0.2.md).
+The `ssmdconvert` package exposes typed conversion and analysis APIs. Bundle
+storage and lifecycle operations use a single kind-neutral facade; existing
+book and document manifest formats remain internal implementation details.
 
-## Documents
+## Bundle lifecycle
 
-`convert_document()` converts a path to an in-memory `ConversionResult`.
-`convert_content()` converts in-memory text, Markdown, or HTML. Both use the
-same immutable, keyword-only `DocumentConversionOptions` object.
-
-```python
-from ssmdconvert import DocumentConversionOptions, convert_content, convert_document
-
-result = convert_document(
-    "manuscript.md",
-    options=DocumentConversionOptions(language="en-US", title="Notes"),
-)
-text_result = convert_content(
-    "# Notes\n\nRead this.",
-    input_format="markdown",
-    source_name="notes.md",
-    options=DocumentConversionOptions(language="en-US"),
-)
-```
-
-A small executable example:
-
-```{doctest}
->>> from ssmdconvert import DocumentConversionOptions, convert_content
->>> result = convert_content("Hello.", input_format="text", options=DocumentConversionOptions(language="en-US"))
->>> result.document.metadata["language"]
-'en-US'
-```
-
-`inspect_document(source)` returns the normalized `Document` without rendering
-or writing an output file. The lower-level `Converter` and the source-neutral
-`Document`, `Section`, `SourceInfo`, and `ConversionResult` models remain
-available for callers that need adapter control.
-
-```{autofunction} ssmdconvert.inspect_document
-
-```
-
-```{autofunction} ssmdconvert.convert_document
-
-```
-
-```{autofunction} ssmdconvert.convert_content
-
-```
-
-```{autoclass} ssmdconvert.DocumentConversionOptions
-:members:
-```
-
-```{autoclass} ssmdconvert.ConversionResult
-:members:
-```
-
-## Rendered SSMD document workspaces
-
-`SsmdDocument` represents a rendered SSMD artifact with source provenance; it is distinct from the normalized source-neutral `Document`. `convert_document_artifact()` builds the artifact, and publication remains explicit through `write_document_bundle()`:
+`convert_bundle()` detects the source kind, converts the input, and writes a
+canonical directory workspace. `inspect_bundle_source()` inspects a source or
+bundle. `load_bundle()` and `validate_bundle()` strictly verify supported
+manifest content. `load_bundle_workspace()` reads current valid directory
+content and reports dirty state; `refresh_bundle_workspace()` updates recorded
+digests. `pack_bundle()` writes a canonical archive without changing the
+workspace.
 
 ```python
 from ssmdconvert import (
-    DocumentWorkspace,
-    SsmdDocument,
-    WorkspaceDocumentStatus,
-    convert_document_artifact,
-    load_document_bundle,
-    load_document_workspace,
-    refresh_document_workspace,
-    validate_document_bundle,
-    write_document_bundle,
+    convert_bundle,
+    inspect_bundle_source,
+    load_bundle,
+    pack_bundle,
+    refresh_bundle_workspace,
+    validate_bundle,
 )
 
-artifact: SsmdDocument = convert_document_artifact("story.ssmd.md")
-write_document_bundle(artifact, "story.ssmdoc", format="directory")
-loaded: SsmdDocument = load_document_bundle("story.ssmdoc")
-workspace: DocumentWorkspace = load_document_workspace("story.ssmdoc")
-status: WorkspaceDocumentStatus = workspace.status
-refreshed = refresh_document_workspace("story.ssmdoc")
-validate_document_bundle("story.ssmdoc")
+result = convert_bundle("novel.epub", output="novel.ssmd-bundle")
+assert result.kind == "book"
+loaded = load_bundle(result.output)
+assert loaded.kind == result.kind
+
+inspection = inspect_bundle_source("notes.md")
+assert inspection.kind == "document"
+workspace = refresh_bundle_workspace("novel.ssmd-bundle")
+archive = pack_bundle("novel.ssmd-bundle")
+assert validate_bundle(archive) == workspace.kind
 ```
 
-`load_document_bundle()` strictly loads a directory or ZIP. `load_document_workspace()` accepts only a directory and returns current valid SSMD even when the recorded digest is stale; it reports dirty state without rewriting the manifest. See [Single-document SSMD workspaces](documents.md) for the CLI lifecycle and [`.ssmdoc` bundle format](document-bundle-format.md) for integrity and security rules.
+`convert_bundle()` accepts conversion options such as `chapters`, `language`,
+`metadata_overrides`, `speech_semantics`, and local spaCy policy. `chapters` is
+meaningful for books; a document accepts only the default `all` selector.
 
-## EPUB books
+```{autofunction} ssmdconvert.convert_bundle
 
-`convert_book()` returns `BookConversionResult`, not a bare `Book`. The result
-contains the converted `book`, a discriminated `speech` outcome, and structured
-`issues`. Use `result.book` when you want to explicitly publish a bundle.
+```
+
+```{autofunction} ssmdconvert.inspect_bundle_source
+
+```
+
+```{autofunction} ssmdconvert.load_bundle
+
+```
+
+```{autofunction} ssmdconvert.load_bundle_workspace
+
+```
+
+```{autofunction} ssmdconvert.refresh_bundle_workspace
+
+```
+
+```{autofunction} ssmdconvert.pack_bundle
+
+```
+
+```{autofunction} ssmdconvert.validate_bundle
+
+```
+
+```{autoclass} ssmdconvert.BundleConversionResult
+:members:
+```
+
+```{autoclass} ssmdconvert.BundleInspection
+:members:
+```
+
+```{autoclass} ssmdconvert.LoadedBundle
+:members:
+```
+
+## In-memory conversion
+
+For callers that need in-memory models, `convert_document()` and
+`convert_content()` return a `ConversionResult`; `convert_book()` returns a
+`BookConversionResult` containing the converted book and speech outcome.
+Publication remains explicit with the neutral `write_bundle()` API.
 
 ```python
 from ssmdconvert import (
     BookConversionOptions,
+    DocumentConversionOptions,
     SpeechOptions,
     convert_book,
-    write_book_bundle,
+    convert_content,
+    convert_document,
+    write_bundle,
 )
 
-result = convert_book(
+document = convert_document(
+    "manuscript.md",
+    options=DocumentConversionOptions(language="en-US"),
+)
+content = convert_content("# Notes\n\nRead this.", input_format="markdown")
+book_result = convert_book(
     "novel.epub",
     options=BookConversionOptions(
         chapters="2-20",
         language="de-DE",
-        metadata_overrides={"voice_defaults": {"narrator": {"rate": "slow"}}},
-        speech=SpeechOptions(mode="freeze", spacy="off"),
+        speech=SpeechOptions(mode="preserve"),
     ),
 )
-write_book_bundle(result.book, "selected.ssmdbook", format="directory")
-report = result.speech.to_dict()
+write_bundle(book_result.book, "selected.ssmd-bundle")
 ```
 
-The default speech mode is `freeze`; select `SpeechOptions(mode="preserve")` for
-structural-only conversion. Freeze requires a resolvable language. Inline SSMD
-language scopes and author-owned annotations remain authoritative. `SpeechOutcome`
-contains a versioned JSON-ready report and, for a complete freeze, a summary.
-Failed freezes raise `SpeechFreezeFailure` with structured partial evidence.
+## Analysis, reports, and speech
 
-```{autofunction} ssmdconvert.inspect_book
-
-```
-
-```{autofunction} ssmdconvert.convert_book
-
-```
-
-```{autoclass} ssmdconvert.BookConversionOptions
-:members:
-```
-
-```{autoclass} ssmdconvert.SpeechOptions
-:members:
-```
-
-```{autoclass} ssmdconvert.BookConversionResult
-:members:
-```
-
-```{autoclass} ssmdconvert.SpeechOutcome
-:members:
-```
-
-```{autoclass} ssmdconvert.SpeechFreezeFailure
-:members:
-```
-
-## SSMD analysis, reports, and TXT
-
-`analyze_ssmd()` accepts standalone SSMD, a validated `.ssmdbook` or `.ssmdoc` bundle/workspace path,
-or an in-memory `Book` or `BookConversionResult`. In-memory books are adapted
-with `loaded_source_from_book`; analysis does not write a temporary bundle.
-Analysis and projection are separate, so a report can reuse the exact projection
-whose text and digest are returned to a downstream caller.
+`analyze_ssmd()` accepts standalone SSMD, either canonical bundle storage form,
+or an in-memory `Book` or `BookConversionResult`. Analysis and text projection
+are separate so the same projection can be reused in a report and downstream
+workflow. `analyze_ssmd()` does not write or read a persistent cache; use
+`analyze_cached()` and `lookup_cached_context()` for explicit cached analysis.
 
 ```python
 from ssmdconvert import (
     AnalysisOptions,
     TextProjectionOptions,
     analyze_ssmd,
-    audit_speech,
     build_report,
     project_text,
 )
 
-analysis = analyze_ssmd("chapter.ssmd", options=AnalysisOptions(spacy="off"))
-projection = project_text(
-    analysis,
-    options=TextProjectionOptions(max_paragraph_chars=1000),
-)
+analysis = analyze_ssmd("notes.ssmd-bundle", options=AnalysisOptions(spacy="off"))
+projection = project_text(analysis, options=TextProjectionOptions())
 report = build_report(analysis, projection=projection)
-audit = audit_speech(analysis)
-assert report.projection.prepared_output_sha256 == projection.stats.prepared_output_sha256
 ```
 
-```{doctest}
->>> from pathlib import Path
->>> from tempfile import TemporaryDirectory
->>> from ssmdconvert import AnalysisOptions, TextProjectionOptions, analyze_ssmd, build_report, freeze_speech, project_text
->>> with TemporaryDirectory() as directory:
-...     source = Path(directory) / "example.ssmd"
-...     _ = source.write_text('---\nssmd_version: "0.9"\nlanguage: en-US\n---\nRead.', encoding="utf-8")
-...     analysis = analyze_ssmd(source, options=AnalysisOptions(spacy="off"))
-...     projection = project_text(analysis, options=TextProjectionOptions(max_paragraph_chars=None))
-...     report = build_report(analysis, projection=projection)
-...     frozen = freeze_speech(analysis)
->>> projection.text
-'Read.'
->>> report.projection.prepared_output_sha256 == projection.stats.prepared_output_sha256
-True
->>> frozen.status
-'complete'
-```
-
-`AnalysisOptions` controls section selection, language resolution, sequence
-fallback, preparation profile, overrides, pronunciation mappings, title
-coverage, and local spaCy policy. `TextProjectionOptions` controls title
-projection and paragraph splitting. The default spaCy policy is `off`; models
-are local-only and SSMDConvert never downloads spaCy or a language model.
+`freeze_speech()` rewrites an existing analysis in memory and never writes to
+the source. An incomplete freeze raises `SpeechFreezeFailure` with partial
+evidence. See [analysis and speech workflows](analysis-workflows.md) for CLI
+usage, cache freshness, and safe publication.
 
 ```{autofunction} ssmdconvert.analyze_ssmd
 
@@ -214,7 +153,7 @@ are local-only and SSMDConvert never downloads spaCy or a language model.
 
 ```
 
-```{autofunction} ssmdconvert.audit_speech
+```{autofunction} ssmdconvert.freeze_speech
 
 ```
 
@@ -226,69 +165,10 @@ are local-only and SSMDConvert never downloads spaCy or a language model.
 :members:
 ```
 
-```{autoclass} ssmdconvert.SsmdAnalysis
+```{autoclass} ssmdconvert.BookConversionOptions
 :members:
 ```
 
-```{autoclass} ssmdconvert.SsmdAnalysisReport
+```{autoclass} ssmdconvert.DocumentConversionOptions
 :members:
 ```
-
-## Speech audit, freeze, and change context
-
-`freeze_speech(analysis)` freezes an existing analysis in memory and returns
-`SpeechFreezeResult`: complete rendered section SSMD, the immutable speech
-report, final mapped changes, and issues. It never writes to the source. An
-incomplete freeze raises `SpeechFreezeFailure` and carries partial report
-evidence instead of returning partially rewritten content.
-
-`lookup_change_context(analysis_or_report, change_id)` resolves a change from
-in-memory typed evidence. It does not require a prior report command or disk
-cache. Persistent cache behavior is explicit and separately named:
-`analyze_cached()` writes checksummed analysis records under the selected cache
-root, while `lookup_cached_context()` checks the current source chapter against
-that saved evidence before returning context. `analyze_ssmd()` does not create
-or read this cache.
-
-```python
-from ssmdconvert import (
-    AnalysisOptions,
-    analyze_ssmd,
-    freeze_speech,
-    lookup_change_context,
-)
-
-analysis = analyze_ssmd("chapter.ssmd", options=AnalysisOptions(spacy="off"))
-if analysis.preparation.changes:
-    change_id = analysis.preparation.changes[0].id
-    context = lookup_change_context(analysis, change_id)
-frozen = freeze_speech(analysis)
-```
-
-```{autofunction} ssmdconvert.freeze_speech
-
-```
-
-```{autofunction} ssmdconvert.analyze_cached
-
-```
-
-```{autofunction} ssmdconvert.lookup_change_context
-
-```
-
-```{autofunction} ssmdconvert.lookup_cached_context
-
-```
-
-```{autoclass} ssmdconvert.SpeechFreezeResult
-:members:
-```
-
-```{autoclass} ssmdconvert.SsmdChangeContext
-:members:
-```
-
-See the [analysis workflow guide](analysis-workflows.md) for cache freshness,
-progress, CLI usage, and safe artifact publication. See [book bundles](books.md)
-and [bundle format](bundle-format.md) for explicit bundle/workspace operations.

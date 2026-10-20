@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from ssmdconvert import Book, BookChapter, SourceInfo, write_book_bundle
+from ssmdconvert import Book, BookChapter, SourceInfo
+from ssmdconvert._book_bundle import write_book_bundle
 from ssmdconvert.analysis.cache import AnalysisCache, analyze_with_cache
 from ssmdconvert.analysis.context import lookup_context, render_context
 from ssmdconvert.errors import ContextLookupError
@@ -93,7 +94,7 @@ def test_mixed_language_context_uses_coherent_paragraph_by_default(tmp_path: Pat
 
 
 def test_context_ignores_unrelated_chapter_edits_but_rejects_stale_target(tmp_path: Path) -> None:
-    source = _book_source(tmp_path / "book.ssmdbook")
+    source = _book_source(tmp_path / "book.ssmd-bundle")
     cache = AnalysisCache(tmp_path / "cache")
     analysis = analyze_with_cache(source, cache=cache, max_paragraph_chars=None)
     change_id = _change_id(analysis)
@@ -116,7 +117,7 @@ def test_context_ignores_unrelated_chapter_edits_but_rejects_stale_target(tmp_pa
 
 
 def test_dirty_workspace_current_chapter_bytes_are_analyzable(tmp_path: Path) -> None:
-    source = _book_source(tmp_path / "dirty.ssmdbook")
+    source = _book_source(tmp_path / "dirty.ssmd-bundle")
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
     first_chapter = next(item for item in manifest["chapters"] if item["id"] == "chapter-0001")
     chapter_path = source / first_chapter["path"]

@@ -12,7 +12,7 @@ preparation/QA API used internally by `ssmdconvert`.
 | `ttsready txt SOURCE ...`     | `ssmdconvert txt SOURCE ...`                     |
 | `ttsready export SOURCE ...`  | `ssmdconvert txt SOURCE ... -o OUTPUT.txt`       |
 | `ttsready convert SOURCE ...` | `ssmdconvert txt SOURCE ...`                     |
-| `ttsready chapters EPUB`      | `ssmdconvert book inspect EPUB`                  |
+| `ttsready chapters EPUB`      | `ssmdconvert bundle inspect EPUB`                |
 | `ttsready preflight SOURCE`   | `ssmdconvert report SOURCE --fail-on-warning`    |
 
 `ssmdconvert convert` converts an input document to SSMD. Use `ssmdconvert txt`

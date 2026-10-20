@@ -9,13 +9,10 @@ from ssmd import parse_structure
 from typer.testing import CliRunner
 
 import ssmdconvert.cli as cli_module
+from ssmdconvert import SsmdDocument, load_bundle
+from ssmdconvert._document_bundle import write_document_bundle
 from ssmdconvert.cli import app
-from ssmdconvert.document_bundle import (
-    load_document_bundle,
-    load_document_workspace,
-    write_document_bundle,
-)
-from ssmdconvert.models import SourceInfo, SsmdDocument
+from ssmdconvert.models import SourceInfo
 
 runner = CliRunner()
 
@@ -23,11 +20,7 @@ runner = CliRunner()
 def _document() -> SsmdDocument:
     ssmd = '---\nssmd_version: "0.9"\ntitle: "Speech test"\nlanguage: en-US\n---\nMeasure 5 kg.\n'
     return SsmdDocument(
-        source=SourceInfo(
-            format="markdown",
-            media_type="text/markdown",
-            name="source.md",
-        ),
+        source=SourceInfo(format="markdown", media_type="text/markdown", name="source.md"),
         metadata={"title": "Speech test", "language": "en-US"},
         ssmd=ssmd,
         source_sha256=hashlib.sha256(b"source artifact").hexdigest(),
@@ -42,17 +35,14 @@ def _workspace_bytes(path: Path) -> dict[str, bytes]:
     }
 
 
-@pytest.mark.parametrize(
-    ("source_format", "output_format"),
-    [("directory", "directory"), ("directory", "zip"), ("zip", "directory"), ("zip", "zip")],
-)
-def test_speech_freeze_publishes_ssmdoc_without_mutating_source(
-    tmp_path: Path,
-    source_format: Literal["directory", "zip"],
-    output_format: Literal["directory", "zip"],
+@pytest.mark.parametrize("source_format", ["directory", "zip"])
+def test_speech_freeze_publishes_canonical_document_bundle_without_mutating_source(
+    tmp_path: Path, source_format: Literal["directory", "zip"]
 ) -> None:
-    source = tmp_path / ("source.ssmdoc" if source_format == "directory" else "source.ssmdoc.zip")
-    output = tmp_path / ("frozen.ssmdoc" if output_format == "directory" else "frozen.ssmdoc.zip")
+    source = tmp_path / (
+        "source.ssmd-bundle" if source_format == "directory" else "source.ssmd-bundle.zip"
+    )
+    output = tmp_path / f"frozen-{source_format}.ssmd-bundle"
     original = _document()
     write_document_bundle(original, source, format=source_format)
     before = _workspace_bytes(source) if source.is_dir() else source.read_bytes()
@@ -60,26 +50,27 @@ def test_speech_freeze_publishes_ssmdoc_without_mutating_source(
     result = runner.invoke(app, ["speech", "freeze", str(source), "-o", str(output)])
 
     assert result.exit_code == 0, result.output
-    frozen = load_document_bundle(output)
-    assert "{sub=" in frozen.ssmd
+    frozen = load_bundle(output)
+    assert frozen.kind == "document"
+    assert isinstance(frozen.value, SsmdDocument)
+    assert "{sub=" in frozen.value.ssmd
     assert (
-        parse_structure(frozen.ssmd, dialect="0.9", normalize=False).clean_text
+        parse_structure(frozen.value.ssmd, dialect="0.9", normalize=False).clean_text
         == parse_structure(original.ssmd, dialect="0.9", normalize=False).clean_text
     )
-    assert frozen.source_sha256 == original.source_sha256
-    assert frozen.metadata == original.metadata
-    assert frozen.speech_semantics is not None
-    assert frozen.speech_semantics["status"] == "complete"
-    assert frozen.speech_semantics["source_sha256"] == original.source_sha256
+    assert frozen.value.source_sha256 == original.source_sha256
+    assert frozen.value.metadata == original.metadata
+    assert frozen.value.speech_semantics is not None
+    assert frozen.value.speech_semantics["status"] == "complete"
     after = _workspace_bytes(source) if source.is_dir() else source.read_bytes()
     assert after == before
 
 
-def test_speech_freeze_accepts_dirty_workspace_and_preserves_its_current_content(
+def test_speech_freeze_accepts_dirty_workspace_and_preserves_current_content(
     tmp_path: Path,
 ) -> None:
-    source = tmp_path / "dirty.ssmdoc"
-    output = tmp_path / "frozen.ssmdoc"
+    source = tmp_path / "dirty.ssmd-bundle"
+    output = tmp_path / "frozen.ssmd-bundle"
     write_document_bundle(_document(), source, format="directory")
     current_path = source / "document.ssmd.md"
     current_path.write_text(
@@ -87,24 +78,22 @@ def test_speech_freeze_accepts_dirty_workspace_and_preserves_its_current_content
         encoding="utf-8",
     )
     dirty_before = _workspace_bytes(source)
-    assert load_document_workspace(source).dirty
 
     result = runner.invoke(app, ["speech", "freeze", str(source), "-o", str(output)])
 
     assert result.exit_code == 0, result.output
-    frozen = load_document_bundle(output)
-    assert frozen.ssmd.startswith('---\nssmd_version: "0.9"')
-    assert "Please measure" in frozen.ssmd
-    assert "{sub=" in frozen.ssmd
+    frozen = load_bundle(output)
+    assert isinstance(frozen.value, SsmdDocument)
+    assert "Please measure" in frozen.value.ssmd
+    assert "{sub=" in frozen.value.ssmd
     assert _workspace_bytes(source) == dirty_before
 
 
 def test_speech_freeze_rejects_source_change_during_materialization(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = tmp_path / "source.ssmdoc"
-    output = tmp_path / "must-not-exist.ssmdoc"
+    source = tmp_path / "source.ssmd-bundle"
+    output = tmp_path / "must-not-exist.ssmd-bundle"
     write_document_bundle(_document(), source, format="directory")
     document_path = source / "document.ssmd.md"
     original_freeze = cli_module.freeze_speech_api

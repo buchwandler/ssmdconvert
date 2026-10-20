@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from ssmdconvert import Book, BookChapter, SourceInfo, write_book_bundle
+from ssmdconvert import Book, BookChapter, SourceInfo
+from ssmdconvert._book_bundle import write_book_bundle
+from ssmdconvert._document_bundle import write_document_bundle
 from ssmdconvert.analysis import load_ssmd_source, select_sections
 from ssmdconvert.analysis.fingerprints import content_fingerprint, sha256_file
 from ssmdconvert.analysis.source import loaded_source_from_book
-from ssmdconvert.document_bundle import write_document_bundle
 from ssmdconvert.errors import AnalysisSourceError
 from ssmdconvert.models import SsmdDocument
 
@@ -45,7 +46,7 @@ def _book() -> Book:
 
 
 def _bundle(tmp_path: Path, *, format: str = "directory") -> Path:
-    output = tmp_path / ("book.ssmdbook" if format == "directory" else "book.ssmdbook.zip")
+    output = tmp_path / ("book.ssmd-bundle" if format == "directory" else "book.ssmd-bundle.zip")
     return write_book_bundle(_book(), output, format=format)  # type: ignore[arg-type]
 
 
@@ -118,11 +119,11 @@ def test_dot_loads_current_directory_when_it_is_a_book_workspace(
 
 
 def test_invalid_source_manifest_is_reported_as_source_error(tmp_path: Path) -> None:
-    invalid = tmp_path / "invalid.ssmdbook"
+    invalid = tmp_path / "invalid.ssmd-bundle"
     invalid.mkdir()
     (invalid / "manifest.json").write_text("{", encoding="utf-8")
 
-    with pytest.raises(AnalysisSourceError, match="could not inspect SSMD workspace"):
+    with pytest.raises(AnalysisSourceError, match="could not load SSMD bundle workspace"):
         load_ssmd_source(invalid)
 
 
@@ -193,7 +194,7 @@ def test_loaded_source_from_book_supports_conversion_time_books(tmp_path: Path) 
     )
 
     assert source.path == path
-    assert source.kind == "ssmdbook"
+    assert source.kind == "bundle"
     assert source.workspace_type == "generated"
     assert source.workspace_status == "clean"
     assert [section.id for section in source.sections] == ["chapter-0005", "chapter-0002"]
@@ -209,7 +210,7 @@ def _document_bundle(tmp_path: Path, *, format: str = "directory") -> Path:
         ssmd=_ssmd("Story", "Measure 5 kg."),
         source_sha256=hashlib.sha256(source_bytes).hexdigest(),
     )
-    suffix = ".ssmdoc" if format == "directory" else ".ssmdoc.zip"
+    suffix = ".ssmd-bundle" if format == "directory" else ".ssmd-bundle.zip"
     return write_document_bundle(
         document,
         tmp_path / f"story{suffix}",
@@ -217,21 +218,22 @@ def _document_bundle(tmp_path: Path, *, format: str = "directory") -> Path:
     )
 
 
-def test_document_directory_and_zip_load_as_single_ssmdoc_section(tmp_path: Path) -> None:
+def test_document_directory_and_zip_load_as_single_bundle_section(tmp_path: Path) -> None:
     directory = _document_bundle(tmp_path)
     archive = _document_bundle(tmp_path, format="zip")
 
     source = load_ssmd_source(directory)
     zipped = load_ssmd_source(archive)
 
-    assert source.kind == source.input_format == "ssmdoc"
+    assert source.kind == "bundle"
+    assert source.input_format == "ssmd-bundle"
     assert source.workspace_type == "directory"
     assert source.workspace_status == "clean"
     assert source.sections[0].id == "document-0001"
     assert source.sections[0].source_number == 1
     assert source.sections[0].title == "Story"
     assert len(source.sections) == 1
-    assert zipped.kind == "ssmdoc"
+    assert zipped.kind == "bundle"
     assert zipped.workspace_type == "zip"
     assert zipped.source_sha256 == hashlib.sha256(archive.read_bytes()).hexdigest()
     assert (
@@ -265,11 +267,11 @@ def test_dot_loads_document_workspace_from_its_directory(
     source = load_ssmd_source(".")
 
     assert source.path == workspace.resolve()
-    assert source.kind == "ssmdoc"
+    assert source.kind == "bundle"
     assert source.sections[0].id == "document-0001"
 
 
-def test_generic_report_txt_context_and_speech_audit_accept_ssmdoc(
+def test_generic_report_txt_context_and_speech_audit_accept_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from typer.testing import CliRunner
@@ -283,7 +285,7 @@ def test_generic_report_txt_context_and_speech_audit_accept_ssmdoc(
     report = runner.invoke(app, ["report", str(workspace), "--format", "json"])
     assert report.exit_code == 0, report.output
     payload = json.loads(report.output)
-    assert payload["source"]["input_format"] == "ssmdoc"
+    assert payload["source"]["input_format"] == "ssmd-bundle"
     assert payload["section_stats"][0]["section_id"] == "document-0001"
     assert (
         "Dirty document: none"

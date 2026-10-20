@@ -674,6 +674,7 @@ def _make_snapshot(
             "path": str(analysis.source.path.resolve()),
             "kind": analysis.source.kind,
             "input_format": analysis.source.input_format,
+            "bundle_kind": analysis.source.bundle_kind,
             "source_sha256": analysis.source.source_sha256,
             "content_fingerprint": analysis.source.content_fingerprint,
             "selected_sections": [

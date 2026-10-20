@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sys
@@ -25,9 +26,6 @@ from .api import (
     audit_speech as audit_speech_api,
 )
 from .api import (
-    convert_book as convert_book_api,
-)
-from .api import (
     convert_document,
     inspect_document,
     lookup_cached_context,
@@ -36,37 +34,32 @@ from .api import (
 from .api import (
     freeze_speech as freeze_speech_api,
 )
-from .books import inspect_book
 from .bundle import (
-    _publish_path_no_replace,
-    load_book_bundle,
-    load_book_workspace,
-    refresh_book_workspace,
-    validate_book_bundle,
-    write_book_bundle,
+    convert_bundle,
+    inspect_bundle_source,
+    load_bundle,
+    load_bundle_workspace,
+    pack_bundle,
+    read_current_bundle_item_bytes,
+    refresh_bundle_workspace,
+    validate_bundle,
+    write_bundle,
 )
+from .bundle_identity import default_bundle_workspace_path
 from .cli_help import AdaptiveTyper, AdaptiveTyperGroup
 from .converter import Converter
-from .document_bundle import (
-    load_document_bundle,
-    load_document_workspace,
-    refresh_document_workspace,
-    validate_document_bundle,
-    write_document_bundle,
-)
 from .errors import BookError, DocumentBundleError, SSMDConvertError
 from .linguistics import SpacyPolicy
 from .metadata import load_metadata_file
+from .models import Book, BookInspection, BookWorkspace, DocumentWorkspace, SsmdDocument
 from .options import (
     AnalysisOptions,
-    BookConversionOptions,
     DocumentConversionOptions,
-    SpeechOptions,
     TextProjectionOptions,
 )
 from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SpeechSemanticsMode
 from .progress import ProgressCallback, ProgressEvent
-from .services.document_conversion import convert_document_artifact
+from .results import BookConversionResult
 from .speech.failures import SpeechFreezeFailure
 from .speech.provenance import build_speech_provenance
 from .speech.workflows import summarize_changes
@@ -80,24 +73,16 @@ app = AdaptiveTyper(
     add_completion=False,
     no_args_is_help=True,
     rich_markup_mode=None,
-    help="Convert documents and books into SSMD.",
+    help="Convert documents into canonical SSMD bundles.",
 )
-book_app = AdaptiveTyper(
+bundle_app = AdaptiveTyper(
     cls=AdaptiveTyperGroup,
     add_completion=False,
     no_args_is_help=True,
     rich_markup_mode=None,
-    help="Inspect and convert EPUB books.",
+    help="Inspect, convert, and manage SSMD bundles.",
 )
-app.add_typer(book_app, name="book")
-document_app = AdaptiveTyper(
-    cls=AdaptiveTyperGroup,
-    add_completion=False,
-    no_args_is_help=True,
-    rich_markup_mode=None,
-    help="Convert and manage single-document SSMD workspaces.",
-)
-app.add_typer(document_app, name="document")
+app.add_typer(bundle_app, name="bundle")
 speech_app = AdaptiveTyper(
     cls=AdaptiveTyperGroup,
     add_completion=False,
@@ -130,7 +115,7 @@ def main(
         typer.Option("--version", callback=_version, is_eager=True, help="Show version and exit."),
     ] = None,
 ) -> None:
-    """Convert documents and books into Speech Synthesis Markdown."""
+    """Convert sources into Speech Synthesis Markdown."""
     del version
 
 
@@ -346,6 +331,39 @@ def _reject_input_overwrite(source: Path, destination: Path) -> None:
         raise ValueError("output destination must not be the input file")
 
 
+def _publish_path_no_replace(source: Path, target: Path) -> None:
+    """Publish a completed file without replacing an existing destination."""
+    link = getattr(os, "link", None)
+    if link is not None:
+        try:
+            link(source, target)
+            return
+        except OSError as exc:
+            unsupported = {
+                errno.EPERM,
+                errno.EXDEV,
+                getattr(errno, "EOPNOTSUPP", -1),
+                getattr(errno, "ENOTSUP", -1),
+                getattr(errno, "ENOSYS", -1),
+            }
+            if exc.errno not in unsupported:
+                raise
+
+    fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    reservation = os.fstat(fd)
+    os.close(fd)
+    try:
+        os.replace(source, target)
+    except OSError:
+        try:
+            current = target.stat()
+            if (current.st_dev, current.st_ino) == (reservation.st_dev, reservation.st_ino):
+                target.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def _write_text_atomically(
     text: str,
     destination: Path,
@@ -454,61 +472,6 @@ def _render_freeze_summary(
     return "\n".join(lines)
 
 
-def _book_output_format(
-    destination: Path,
-    requested: str | None,
-) -> Literal["directory", "zip"]:
-    if requested is not None:
-        normalized = requested.lower()
-        if normalized == "directory":
-            return "directory"
-        if normalized == "zip":
-            return "zip"
-        raise typer.BadParameter("--format must be 'directory' or 'zip'")
-
-    name = destination.name.lower()
-    if name.endswith(".ssmdbook.zip"):
-        return "zip"
-    if name.endswith(".ssmdbook"):
-        return "directory"
-    raise typer.BadParameter(
-        "cannot infer bundle format from this output name; pass --format directory or --format zip"
-    )
-
-
-def _default_document_bundle_path(source: Path) -> Path:
-    lower = source.name.lower()
-    if lower.endswith(".ssmd.md"):
-        base = source.name[: -len(".ssmd.md")]
-    elif lower.endswith(".ssmd"):
-        base = source.name[: -len(".ssmd")]
-    else:
-        base = source.stem
-    return source.with_name(f"{base}.ssmdoc")
-
-
-def _document_output_format(
-    destination: Path,
-    requested: str | None,
-) -> Literal["directory", "zip"]:
-    if requested is not None:
-        normalized = requested.lower()
-        if normalized == "directory":
-            return "directory"
-        if normalized == "zip":
-            return "zip"
-        raise typer.BadParameter("--format must be 'directory' or 'zip'")
-    name = destination.name.lower()
-    if name.endswith(".ssmdoc.zip"):
-        return "zip"
-    if name.endswith(".ssmdoc"):
-        return "directory"
-    raise typer.BadParameter(
-        "cannot infer document bundle format from this output name; "
-        "pass --format directory or --format zip"
-    )
-
-
 def _speech_materialize_to_destination(
     source: Path,
     output: Path,
@@ -517,7 +480,6 @@ def _speech_materialize_to_destination(
     language: str | None,
     sequence_fallback_mode: SequenceFallbackModeOption,
     force: bool,
-    bundle_format: str | None,
     spacy: SpacyPolicy,
     on_progress: ProgressCallback,
     report_output: Path | None = None,
@@ -541,14 +503,13 @@ def _speech_materialize_to_destination(
         ),
         on_progress=on_progress,
     )
-    if bundle_format is not None and analysis.source.kind not in {"ssmdbook", "ssmdoc"}:
-        raise ValueError("--format is only valid when writing an SSMD book or document bundle")
-
-    if analysis.source.kind in {"ssmdbook", "ssmdoc"} and source.is_dir():
+    is_bundle = analysis.source.kind == "bundle"
+    if is_bundle and not destination.name.endswith(".ssmd-bundle"):
+        raise ValueError("bundle output must end with '.ssmd-bundle'")
+    if is_bundle and source.is_dir():
         workspace_root = source.resolve(strict=True)
         if destination.resolve(strict=False).is_relative_to(workspace_root):
             raise ValueError("bundle output must be outside the source workspace")
-    from .bundle import read_current_section_bytes
 
     try:
         frozen = freeze_speech_api(analysis)
@@ -567,7 +528,13 @@ def _speech_materialize_to_destination(
         raise
 
     for section in analysis.sections:
-        current = _canonical_ssmd_bytes(read_current_section_bytes(source, section.id))
+        if is_bundle:
+            current_bytes = read_current_bundle_item_bytes(source, section.id)
+        elif len(analysis.sections) == 1:
+            current_bytes = source.read_bytes()
+        else:
+            raise ValueError("standalone SSMD analysis must contain exactly one section")
+        current = _canonical_ssmd_bytes(current_bytes)
         expected = _canonical_ssmd_bytes(section.ssmd.encode("utf-8"))
         if current != expected:
             raise ValueError(
@@ -575,7 +542,9 @@ def _speech_materialize_to_destination(
                 "no output was written"
             )
 
-    if analysis.source.kind == "ssmd":
+    if not is_bundle:
+        if len(analysis.sections) != 1:
+            raise ValueError("standalone SSMD analysis must contain exactly one section")
         section = analysis.sections[0]
         _write_text_atomically(
             frozen.sections[section.id],
@@ -583,20 +552,20 @@ def _speech_materialize_to_destination(
             source=source,
             force=force,
         )
-    elif analysis.source.kind == "ssmdoc":
+    elif analysis.source.bundle_kind == "document":
         if source.is_dir():
-            document = load_document_workspace(source).document
+            workspace = load_bundle_workspace(source)
+            document_workspace = workspace.value
+            assert isinstance(document_workspace, DocumentWorkspace)
+            document = document_workspace.document
         else:
-            document = load_document_bundle(source)
+            loaded = load_bundle(source)
+            document_value = loaded.value
+            assert isinstance(document_value, SsmdDocument)
+            document = document_value
         if len(analysis.sections) != 1 or analysis.sections[0].id != "document-0001":
-            raise ValueError("SSMD document analysis did not contain document-0001")
+            raise ValueError("document bundle analysis did not contain document-0001")
         section = analysis.sections[0]
-        current_document = _canonical_ssmd_bytes(document.ssmd.encode("utf-8"))
-        expected_document = _canonical_ssmd_bytes(section.ssmd.encode("utf-8"))
-        if current_document != expected_document:
-            raise ValueError(
-                "source document changed during speech materialization; no output was written"
-            )
         updated_document = replace(
             document,
             ssmd=frozen.sections.get(section.id, document.ssmd),
@@ -606,18 +575,18 @@ def _speech_materialize_to_destination(
                 source_sha256=document.source_sha256,
             ),
         )
-        selected_format = _document_output_format(destination, bundle_format)
-        write_document_bundle(
-            updated_document,
-            destination,
-            format=selected_format,
-            overwrite=force,
-        )
+        write_bundle(updated_document, destination, overwrite=force)
     else:
         if source.is_dir():
-            book = load_book_workspace(source).book
+            workspace = load_bundle_workspace(source)
+            book_workspace = workspace.value
+            assert isinstance(book_workspace, BookWorkspace)
+            book = book_workspace.book
         else:
-            book = load_book_bundle(source)
+            loaded = load_bundle(source)
+            book_value = loaded.value
+            assert isinstance(book_value, Book)
+            book = book_value
         current_by_id = {chapter.id: chapter for chapter in book.chapters}
         for section in analysis.sections:
             chapter = current_by_id.get(section.id)
@@ -639,13 +608,7 @@ def _speech_materialize_to_destination(
                 source_sha256=book.source_sha256,
             ),
         )
-        selected_format = _book_output_format(destination, bundle_format)
-        write_book_bundle(
-            updated_book,
-            destination,
-            format=selected_format,
-            overwrite=force,
-        )
+        write_bundle(updated_book, destination, overwrite=force)
 
     report = frozen.speech.to_dict()
     report["output"] = str(destination)
@@ -667,9 +630,11 @@ def _speech_materialize_to_destination(
             failed_outputs.append("freeze report could not be written to stdout")
         requested = " and ".join(failed_outputs) or "requested report output failed"
         message = f"SSMD speech artifact was published at {destination}, but {requested}: {exc}"
-        if analysis.source.kind == "ssmdoc":
+        if analysis.source.bundle_kind == "document":
             raise DocumentBundleError(message) from exc
-        raise BookError(message) from exc
+        if is_bundle:
+            raise BookError(message) from exc
+        raise SSMDConvertError(message) from exc
     return destination, report
 
 
@@ -1055,7 +1020,6 @@ def _run_speech_materialization_command(
     language: str | None,
     sequence_fallback_mode: SequenceFallbackModeOption,
     force: bool,
-    bundle_format: str | None,
     spacy: SpacyPolicy,
     progress: bool | None,
     report_output: Path | None = None,
@@ -1069,7 +1033,6 @@ def _run_speech_materialization_command(
             language=language,
             sequence_fallback_mode=sequence_fallback_mode,
             force=force,
-            bundle_format=bundle_format,
             spacy=spacy,
             on_progress=on_progress,
             report_output=report_output,
@@ -1094,10 +1057,6 @@ def speech_annotate(
         SequenceFallbackModeOption,
         typer.Option("--sequence-fallback-mode"),
     ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
-    bundle_format: Annotated[
-        Literal["directory", "zip"] | None,
-        typer.Option("--format"),
-    ] = None,
     force: Annotated[bool, typer.Option("--force")] = False,
     spacy: Annotated[
         SpacyPolicy,
@@ -1117,7 +1076,6 @@ def speech_annotate(
         language=language,
         sequence_fallback_mode=sequence_fallback_mode,
         force=force,
-        bundle_format=bundle_format,
         spacy=spacy,
         progress=progress,
     )
@@ -1133,10 +1091,6 @@ def speech_freeze(
         SequenceFallbackModeOption,
         typer.Option("--sequence-fallback-mode"),
     ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
-    bundle_format: Annotated[
-        Literal["directory", "zip"] | None,
-        typer.Option("--format"),
-    ] = None,
     force: Annotated[bool, typer.Option("--force")] = False,
     report_output: Annotated[
         Path | None,
@@ -1163,7 +1117,6 @@ def speech_freeze(
         language=language,
         sequence_fallback_mode=sequence_fallback_mode,
         force=force,
-        bundle_format=bundle_format,
         spacy=spacy,
         progress=progress,
         report_output=report_output,
@@ -1171,41 +1124,60 @@ def speech_freeze(
     )
 
 
-@book_app.command("inspect")  # type: ignore[untyped-decorator]
-def book_inspect(
-    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
+@bundle_app.command("inspect")  # type: ignore[untyped-decorator]
+def bundle_inspect(
+    source: Annotated[Path, typer.Argument(exists=True, readable=True)],
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Inspect EPUB metadata and its chapter hierarchy."""
+    """Inspect a supported source or canonical bundle and report its kind."""
 
     def run() -> None:
-        inspection = inspect_book(source)
-        source_info = inspection.source
-        payload = {
-            "source": {
-                "path": str(source_info.path) if source_info.path is not None else None,
-                "name": source_info.name,
-                "format": source_info.format,
-                "media_type": source_info.media_type,
-            },
-            "metadata": dict(inspection.metadata),
-            "chapters": [asdict(chapter) for chapter in inspection.chapters],
-        }
+        inspection = inspect_bundle_source(source)
+        value = inspection.value
+        payload: dict[str, Any] = {"kind": inspection.kind, "source": str(source)}
+        if isinstance(value, BookInspection):
+            payload["metadata"] = dict(value.metadata)
+            payload["chapters"] = [asdict(chapter) for chapter in value.chapters]
+        elif isinstance(value, Book):
+            payload["metadata"] = dict(value.metadata)
+            payload["chapters"] = [asdict(chapter) for chapter in value.chapters]
+        else:
+            metadata = dict(value.metadata)
+            if isinstance(value, SsmdDocument):
+                char_count = len(value.ssmd)
+            else:
+                char_count = sum(len(section.markdown) for section in value.sections)
+            payload["metadata"] = metadata
+            payload["content_items"] = [
+                {
+                    "id": "document-0001",
+                    "title": metadata.get("title"),
+                    "char_count": char_count,
+                }
+            ]
+
         if json_output:
             typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
             return
-        typer.echo(f"Source format: {source_info.format}")
-        typer.echo(f"Chapters: {len(inspection.chapters)}")
-        for chapter in inspection.chapters:
-            indent = "  " * (chapter.level - 1)
-            typer.echo(f"{chapter.source_number:04d}  {indent}{chapter.title}")
+        typer.echo(f"kind: {inspection.kind}")
+        if inspection.kind == "book":
+            chapters = payload["chapters"]
+            typer.echo(f"Chapters: {len(chapters)}")
+            for chapter in chapters:
+                indent = "  " * (chapter["level"] - 1)
+                typer.echo(f"{chapter['source_number']:04d}  {indent}{chapter['title']}")
+        else:
+            item = payload["content_items"][0]
+            typer.echo("Content items: 1")
+            typer.echo(f"Document: {item['title'] or '(untitled)'} ({item['char_count']} chars)")
 
     _run_with_domain_errors(run)
 
 
-_BOOK_METADATA_FIELDS = (
+_BUNDLE_METADATA_FIELDS = (
     ("title", "Title"),
     ("authors", "Authors"),
+    ("author", "Author"),
     ("language", "Language"),
     ("sequence_fallback_mode", "Sequence fallback mode"),
     ("voice_bindings", "Voice bindings"),
@@ -1239,125 +1211,121 @@ def _metadata_entry_lines(key: str, label: str, metadata: Mapping[str, Any]) -> 
 
 
 def _render_stored_metadata(metadata: Mapping[str, Any]) -> str:
-    lines = ["Stored metadata", ""]
-    known_keys = {key for key, _label in _BOOK_METADATA_FIELDS}
-    for key, label in _BOOK_METADATA_FIELDS:
+    lines: list[str] = []
+    known_keys = {key for key, _label in _BUNDLE_METADATA_FIELDS}
+    for key, label in _BUNDLE_METADATA_FIELDS:
         lines.extend(_metadata_entry_lines(key, label, metadata))
     for key in sorted(metadata.keys() - known_keys):
         lines.extend(_metadata_entry_lines(key, key.replace("_", " ").title(), metadata))
     return "\n".join(lines)
 
 
-@book_app.command("metadata")  # type: ignore[untyped-decorator]
-def book_metadata(
+@bundle_app.command("metadata")  # type: ignore[untyped-decorator]
+def bundle_metadata(
     bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Display metadata stored in a directory or ZIP SSMD book bundle."""
+    """Display neutral metadata for either kind of canonical SSMD bundle."""
 
     def run() -> None:
         if bundle.is_dir():
-            workspace = load_book_workspace(bundle)
-            book = workspace.book
-            dirty_count = sum(chapter.dirty for chapter in workspace.chapters)
-            workspace_lines = [
-                "Workspace: directory",
-                f"Status: {'dirty' if workspace.dirty else 'clean'}",
-                f"Dirty chapters: {dirty_count}",
-            ]
+            workspace = load_bundle_workspace(bundle)
+            kind = workspace.kind
+            value = workspace.value
+            if isinstance(value, BookWorkspace):
+                metadata = value.book.metadata
+                dirty_count = sum(chapter.dirty for chapter in value.chapters)
+            else:
+                assert isinstance(value, DocumentWorkspace)
+                metadata = value.document.metadata
+                dirty_count = int(value.dirty)
+            status = "dirty" if value.dirty else "clean"
         else:
-            book = load_book_bundle(bundle)
-            workspace_lines = ["Workspace: no", "Status: valid"]
+            loaded = load_bundle(bundle)
+            kind = loaded.kind
+            metadata = loaded.value.metadata
+            dirty_count = 0
+            status = "valid"
+        payload = {"kind": kind, "metadata": dict(metadata)}
         if json_output:
-            typer.echo(
-                json.dumps(
-                    {"metadata": dict(book.metadata)},
-                    ensure_ascii=False,
-                    indent=2,
-                    sort_keys=True,
-                    allow_nan=False,
-                )
-            )
+            typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
             return
-        typer.echo("\n".join(workspace_lines) + "\n\n" + _render_stored_metadata(book.metadata))
+        lines = ["SSMD bundle metadata", f"kind: {kind}", f"Status: {status}"]
+        if bundle.is_dir():
+            lines.append(f"Dirty content items: {dirty_count}")
+        typer.echo("\n".join(lines) + "\n\n" + _render_stored_metadata(metadata))
 
     _run_with_domain_errors(run)
 
 
-@book_app.command("refresh")  # type: ignore[untyped-decorator]
-def book_refresh(
+@bundle_app.command("refresh")  # type: ignore[untyped-decorator]
+def bundle_refresh(
     workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
     check: Annotated[bool, typer.Option("--check")] = False,
 ) -> None:
-    """Refresh an editable workspace manifest, or check whether it is clean."""
+    """Check or refresh an editable bundle workspace of either kind."""
 
     def run() -> None:
+        current = load_bundle_workspace(workspace)
+        if isinstance(current.value, BookWorkspace):
+            dirty_count = sum(chapter.dirty for chapter in current.value.chapters)
+            item_label = "chapters"
+        else:
+            assert isinstance(current.value, DocumentWorkspace)
+            dirty_count = int(current.value.dirty)
+            item_label = "documents"
         if check:
-            current = load_book_workspace(workspace)
-            if current.dirty:
-                dirty_count = sum(chapter.dirty for chapter in current.chapters)
+            if current.value.dirty:
                 typer.echo(f"Workspace dirty: {workspace}", err=True)
-                typer.echo(f"Dirty chapters: {dirty_count}", err=True)
+                typer.echo(f"Dirty {item_label}: {dirty_count}", err=True)
                 raise typer.Exit(code=1)
             typer.echo(f"Workspace clean: {workspace}")
             return
-
-        current = load_book_workspace(workspace)
-        changed_digests = sum(chapter.dirty for chapter in current.chapters)
-        refreshed = refresh_book_workspace(workspace)
-        typer.echo(f"Refreshed {workspace}")
-        typer.echo(f"Chapters: {len(refreshed.chapters)}")
-        typer.echo(f"Changed digests: {changed_digests}")
+        refreshed = refresh_bundle_workspace(workspace)
+        typer.echo(f"Refreshed SSMD bundle workspace: {workspace}")
+        typer.echo(f"kind: {refreshed.kind}")
+        typer.echo(f"Changed content items: {dirty_count}")
         typer.echo("Status: clean")
 
     _run_with_domain_errors(run)
 
 
-@book_app.command("convert")  # type: ignore[untyped-decorator]
-def book_convert(
+@bundle_app.command("convert")  # type: ignore[untyped-decorator]
+def bundle_convert(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     chapters: Annotated[str, typer.Option("--chapters")] = "all",
-    language: Annotated[
-        str | None, typer.Option("-l", "--language", help="Override the book language.")
-    ] = None,
+    language: Annotated[str | None, typer.Option("-l", "--language")] = None,
     metadata_file: Annotated[
         Path | None,
         typer.Option("--metadata-file", help="YAML file with structured metadata overrides."),
     ] = None,
     sequence_fallback_mode: Annotated[
-        SequenceFallbackModeOption,
+        SequenceFallbackModeOption | None,
         typer.Option("--sequence-fallback-mode"),
-    ] = DEFAULT_SEQUENCE_FALLBACK_MODE_OPTION,
+    ] = None,
     speech_semantics: Annotated[
         SpeechSemanticsMode,
-        typer.Option(
-            "--speech-semantics",
-            help="Freeze safe automatic speech decisions or preserve structural-only SSMD.",
-        ),
+        typer.Option("--speech-semantics"),
     ] = "freeze",
-    bundle_format: Annotated[str | None, typer.Option("--format")] = None,
-    force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
-    report_output: Annotated[
-        Path | None,
-        typer.Option("--report", help="Write the versioned speech-freeze report to JSON."),
-    ] = None,
-    json_output: Annotated[
-        bool, typer.Option("--json", help="Write the freeze report to stdout.")
-    ] = False,
     spacy: Annotated[
         SpacyPolicy,
         typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
     ] = "off",
+    report_output: Annotated[Path | None, typer.Option("--report-output")] = None,
+    report_format: Annotated[
+        Literal["markdown", "json"], typer.Option("--report-format")
+    ] = "markdown",
+    force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
     progress: Annotated[
         bool | None,
         typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
     ] = None,
 ) -> None:
-    """Convert an EPUB to SSMD, freezing speech by default or preserving structure explicitly."""
+    """Convert an EPUB or supported document into one editable SSMD bundle."""
 
     def run(on_progress: ProgressCallback) -> None:
-        destination = output or source.with_suffix(".ssmdbook")
+        destination = output or default_bundle_workspace_path(source)
         _reject_input_overwrite(source, _output_path(destination))
         report_destination = _preflight_report_output(
             report_output,
@@ -1365,303 +1333,115 @@ def book_convert(
             output=destination,
             force=force,
         )
-        selected_format = _book_output_format(destination, bundle_format)
-        try:
-            result = convert_book_api(
-                source,
-                options=BookConversionOptions(
-                    chapters=chapters,
-                    language=language,
-                    metadata_overrides=(
-                        load_metadata_file(metadata_file) if metadata_file is not None else {}
-                    ),
-                    sequence_fallback_mode=sequence_fallback_mode.value,
-                    speech=SpeechOptions(mode=speech_semantics, spacy=spacy),
-                ),
-                on_progress=on_progress,
-            )
-        except SpeechFreezeFailure as failure:
-            if report_destination is not None or json_output:
-                failure_report = dict(failure.report)
-                failure_report["output"] = None
-                failure_report["chapter_count"] = len(failure.analysis.sections)
-                json.dumps(failure_report, ensure_ascii=False, indent=2, allow_nan=False)
-                _publish_speech_report(
-                    failure_report,
-                    report_destination=report_destination,
-                    source=source,
-                    force=force,
-                    json_output=json_output,
-                )
-            raise
-
-        book = result.book
-        report = result.speech.to_dict()
-        report["output"] = str(_output_path(destination))
-        report["chapter_count"] = len(book.chapters)
-        # Validate report serialization before publishing the bundle.
-        json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
-        written = write_book_bundle(
-            book,
-            destination,
-            format=selected_format,
-            overwrite=force,
-        )
-        report["output"] = str(written)
-        try:
-            _publish_speech_report(
-                report,
-                report_destination=report_destination,
-                source=source,
-                force=force,
-                json_output=json_output,
-            )
-        except Exception as exc:
-            failed_outputs = []
-            if report_destination is not None:
-                failed_outputs.append(
-                    f"freeze report was not written to {_output_path(report_destination)}"
-                )
-            if json_output:
-                failed_outputs.append("freeze report could not be written to stdout")
-            requested = " and ".join(failed_outputs) or "requested report output failed"
-            raise BookError(
-                f"SSMD book bundle was published at {written}, but {requested}: {exc}"
-            ) from exc
-        if not json_output:
-            typer.echo(f"Created SSMD book bundle: {written}")
-            typer.echo(f"Chapters: {len(book.chapters)}")
-            typer.echo(_render_freeze_summary(report))
-            if report_output is not None:
-                typer.echo(f"Freeze report: {_output_path(report_output)}")
-
-    _run_with_cli_progress(progress, run, "book conversion complete")
-
-
-@book_app.command("pack")  # type: ignore[untyped-decorator]
-def book_pack(
-    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
-    output: Annotated[Path, typer.Option("--output", "-o")],
-    force: Annotated[bool, typer.Option("--force", help="Replace an existing ZIP bundle.")] = False,
-) -> None:
-    """Pack current valid workspace chapters into a strict portable ZIP."""
-
-    def run() -> None:
-        current = load_book_workspace(workspace)
-        destination = _output_path(output)
-        _reject_input_overwrite(workspace, destination)
-        written = write_book_bundle(
-            current.book,
-            destination,
-            format="zip",
-            overwrite=force,
-        )
-        typer.echo(f"Packed SSMD book ZIP: {written}")
-        typer.echo(f"Chapters: {len(current.book.chapters)}")
-
-    _run_with_domain_errors(run)
-
-
-@book_app.command("validate")  # type: ignore[untyped-decorator]
-def book_validate(
-    bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    """Validate a directory or ZIP SSMD book bundle."""
-
-    def run() -> None:
-        validate_book_bundle(bundle)
-        if json_output:
-            typer.echo(json.dumps({"valid": True, "bundle": str(bundle)}, ensure_ascii=False))
-            return
-        typer.echo(f"Valid book bundle: {bundle}")
-
-    _run_with_domain_errors(run)
-
-
-@document_app.command("convert")  # type: ignore[untyped-decorator]
-def document_convert(
-    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
-    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
-    metadata_file: Annotated[
-        Path | None,
-        typer.Option("--metadata-file", help="YAML file with structured metadata overrides."),
-    ] = None,
-    title: Annotated[str | None, typer.Option("--title")] = None,
-    author: Annotated[str | None, typer.Option("--author")] = None,
-    language: Annotated[str | None, typer.Option("-l", "--language")] = None,
-    sequence_fallback_mode: Annotated[
-        SequenceFallbackModeOption | None,
-        typer.Option("--sequence-fallback-mode"),
-    ] = None,
-    bundle_format: Annotated[str | None, typer.Option("--format")] = None,
-    force: Annotated[bool, typer.Option("--force", help="Replace an existing bundle.")] = False,
-) -> None:
-    """Convert a supported source into an editable single-document SSMD workspace."""
-
-    def run() -> None:
-        destination = output or _default_document_bundle_path(source)
-        resolved_destination = _output_path(destination)
-        _reject_input_overwrite(source, resolved_destination)
-        selected_format = _document_output_format(destination, bundle_format)
         metadata_overrides = (
             load_metadata_file(metadata_file) if metadata_file is not None else None
         )
-        document = convert_document_artifact(
-            source,
-            title=title,
-            author=author,
-            language=language,
-            metadata_overrides=metadata_overrides,
-            sequence_fallback_mode=(
-                sequence_fallback_mode.value if sequence_fallback_mode is not None else None
-            ),
-        )
-        written = write_document_bundle(
-            document,
-            destination,
-            format=selected_format,
-            overwrite=force,
-        )
-        typer.echo(f"Created SSMD document bundle: {written}")
+        try:
+            result = convert_bundle(
+                source,
+                output=destination,
+                chapters=chapters,
+                language=language,
+                metadata_overrides=metadata_overrides,
+                sequence_fallback_mode=(
+                    sequence_fallback_mode.value if sequence_fallback_mode is not None else None
+                ),
+                speech_semantics=speech_semantics,
+                spacy=spacy,
+                force=force,
+                on_progress=on_progress,
+            )
+        except SpeechFreezeFailure as failure:
+            if report_destination is not None:
+                failure_payload = dict(failure.report)
+                failure_payload["output"] = None
+                report_text = (
+                    json.dumps(failure_payload, ensure_ascii=False, indent=2, allow_nan=False)
+                    if report_format == "json"
+                    else _render_freeze_summary(failure_payload, operation="Bundle conversion")
+                )
+                _write_text_atomically(
+                    report_text + "\n",
+                    report_destination,
+                    source=source,
+                    force=force,
+                )
+            raise
 
-    _run_with_domain_errors(run)
+        payload: dict[str, Any] = {
+            "kind": result.kind,
+            "output": str(_output_path(result.output or destination)),
+        }
+        if isinstance(result.value, BookConversionResult):
+            payload["speech"] = result.value.speech.to_dict()
+            payload["chapter_count"] = len(result.value.book.chapters)
+        else:
+            payload["metadata"] = dict(result.value.metadata)
+        if report_destination is not None:
+            if report_format == "json":
+                report_text = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)
+            else:
+                markdown_lines = [
+                    "SSMD bundle conversion",
+                    f"kind: {result.kind}",
+                    f"Output: {_output_path(result.output or destination)}",
+                ]
+                if "speech" in payload:
+                    markdown_lines.append(
+                        _render_freeze_summary(payload["speech"], operation="Bundle conversion")
+                    )
+                report_text = "\n".join(markdown_lines)
+            _write_text_atomically(
+                report_text + "\n",
+                report_destination,
+                source=source,
+                force=force,
+            )
+        typer.echo(f"Created SSMD bundle: {result.output}")
+        typer.echo(f"kind: {result.kind}")
+        if "chapter_count" in payload:
+            typer.echo(f"Chapters: {payload['chapter_count']}")
+            typer.echo(_render_freeze_summary(payload["speech"], operation="Bundle conversion"))
+        if report_destination is not None:
+            typer.echo(f"Report: {_output_path(report_destination)}")
+
+    _run_with_cli_progress(progress, run, "bundle conversion complete")
 
 
-@document_app.command("inspect")  # type: ignore[untyped-decorator]
-def document_inspect(
-    source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
-    json_output: Annotated[bool, typer.Option("--json")] = False,
+@bundle_app.command("pack")  # type: ignore[untyped-decorator]
+def bundle_pack(
+    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
 ) -> None:
-    """Inspect a supported source document before conversion."""
+    """Pack an editable workspace into its canonical deterministic ZIP form."""
 
     def run() -> None:
-        converter = Converter()
-        adapter = converter.adapter_for(source)
-        document = inspect_document(source)
-        payload = {
-            "source": str(source),
-            "adapter": adapter.name,
-            "metadata": dict(document.metadata),
-            "sections": [
-                {
-                    "id": section.id,
-                    "title": section.title,
-                    "chars": len(section.markdown),
-                    "source_ref": section.source_ref,
-                }
-                for section in document.sections
-            ],
-        }
-        if json_output:
-            typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
-            return
-        typer.echo(f"Adapter: {adapter.name}")
-        typer.echo(f"Sections: {len(document.sections)}")
-        for section in document.sections:
-            typer.echo(
-                f"  {section.id}: {section.title or '(untitled)'} ({len(section.markdown)} chars)"
-            )
+        written = pack_bundle(workspace, output)
+        kind = validate_bundle(written)
+        typer.echo(f"Packed SSMD bundle: {written}")
+        typer.echo(f"kind: {kind}")
 
     _run_with_domain_errors(run)
 
 
-@document_app.command("metadata")  # type: ignore[untyped-decorator]
-def document_metadata(
+@bundle_app.command("validate")  # type: ignore[untyped-decorator]
+def bundle_validate(
     bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Display metadata from a document workspace or ZIP bundle."""
+    """Strictly validate an editable bundle or packed bundle archive."""
 
     def run() -> None:
-        if bundle.is_dir():
-            workspace = load_document_workspace(bundle)
-            document = workspace.document
-            workspace_lines = [
-                "Workspace: directory",
-                f"Status: {'dirty' if workspace.dirty else 'clean'}",
-                f"Dirty document: {int(workspace.dirty)}",
-            ]
-        else:
-            document = load_document_bundle(bundle)
-            workspace_lines = ["Workspace: no", "Status: valid"]
+        kind = validate_bundle(bundle)
         if json_output:
             typer.echo(
                 json.dumps(
-                    {"metadata": dict(document.metadata)},
+                    {"valid": True, "bundle": str(bundle), "kind": kind},
                     ensure_ascii=False,
-                    indent=2,
-                    sort_keys=True,
-                    allow_nan=False,
                 )
             )
             return
-        typer.echo("\n".join(workspace_lines) + "\n\n" + _render_stored_metadata(document.metadata))
-
-    _run_with_domain_errors(run)
-
-
-@document_app.command("refresh")  # type: ignore[untyped-decorator]
-def document_refresh(
-    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
-    check: Annotated[bool, typer.Option("--check")] = False,
-) -> None:
-    """Refresh a document workspace manifest, or check whether it is clean."""
-
-    def run() -> None:
-        if check:
-            current = load_document_workspace(workspace)
-            if current.dirty:
-                typer.echo(f"Workspace dirty: {workspace}", err=True)
-                typer.echo("Dirty document: 1", err=True)
-                raise typer.Exit(code=1)
-            typer.echo(f"Workspace clean: {workspace}")
-            return
-        current = load_document_workspace(workspace)
-        changed_digest = int(current.dirty)
-        refresh_document_workspace(workspace)
-        typer.echo(f"Refreshed {workspace}")
-        typer.echo(f"Changed digest: {changed_digest}")
-        typer.echo("Status: clean")
-
-    _run_with_domain_errors(run)
-
-
-@document_app.command("pack")  # type: ignore[untyped-decorator]
-def document_pack(
-    workspace: Annotated[Path, typer.Argument(exists=True, readable=True)],
-    output: Annotated[Path, typer.Option("--output", "-o")],
-    force: Annotated[bool, typer.Option("--force", help="Replace an existing ZIP bundle.")] = False,
-) -> None:
-    """Pack current valid workspace content into a strict portable ZIP."""
-
-    def run() -> None:
-        current = load_document_workspace(workspace)
-        destination = _output_path(output)
-        _reject_input_overwrite(workspace, destination)
-        written = write_document_bundle(
-            current.document,
-            destination,
-            format="zip",
-            overwrite=force,
-        )
-        typer.echo(f"Packed SSMD document ZIP: {written}")
-
-    _run_with_domain_errors(run)
-
-
-@document_app.command("validate")  # type: ignore[untyped-decorator]
-def document_validate(
-    bundle: Annotated[Path, typer.Argument(exists=True, readable=True)],
-    json_output: Annotated[bool, typer.Option("--json")] = False,
-) -> None:
-    """Validate a directory or ZIP SSMD document bundle."""
-
-    def run() -> None:
-        validate_document_bundle(bundle)
-        if json_output:
-            typer.echo(json.dumps({"valid": True, "bundle": str(bundle)}, ensure_ascii=False))
-            return
-        typer.echo(f"Valid document bundle: {bundle}")
+        typer.echo(f"Valid SSMD bundle: {bundle}")
+        typer.echo(f"kind: {kind}")
 
     _run_with_domain_errors(run)

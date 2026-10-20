@@ -8,7 +8,8 @@ from ssmd import parse_structure
 from typer.testing import CliRunner
 
 import ssmdconvert.cli as cli_module
-from ssmdconvert import Book, BookChapter, SourceInfo, load_book_bundle, write_book_bundle
+from ssmdconvert import Book, BookChapter, SourceInfo
+from ssmdconvert._book_bundle import load_book_bundle, write_book_bundle
 from ssmdconvert.cli import app
 
 runner = CliRunner()
@@ -200,9 +201,9 @@ def test_annotate_rejects_unresolved_language_without_creating_output(tmp_path: 
 
 
 def test_bundle_chapter_selection_and_freeze_roundtrip(tmp_path: Path) -> None:
-    source = _book(tmp_path / "source.ssmdbook")
-    annotated = tmp_path / "annotated.ssmdbook.zip"
-    frozen = tmp_path / "frozen.ssmdbook.zip"
+    source = _book(tmp_path / "source.ssmd-bundle")
+    annotated = tmp_path / "annotated.ssmd-bundle"
+    frozen = tmp_path / "frozen.ssmd-bundle"
 
     first = runner.invoke(
         app,
@@ -225,7 +226,7 @@ def test_bundle_chapter_selection_and_freeze_roundtrip(tmp_path: Path) -> None:
 
 
 def test_dirty_workspace_writes_only_to_a_new_destination(tmp_path: Path) -> None:
-    workspace = _book(tmp_path / "workspace.ssmdbook")
+    workspace = _book(tmp_path / "workspace.ssmd-bundle")
     manifest = json.loads((workspace / "manifest.json").read_text(encoding="utf-8"))
     chapter = next(item for item in manifest["chapters"] if item["id"] == "chapter-0001")
     chapter_path = workspace / chapter["path"]
@@ -236,13 +237,13 @@ def test_dirty_workspace_writes_only_to_a_new_destination(tmp_path: Path) -> Non
 
     inside = runner.invoke(
         app,
-        ["speech", "annotate", str(workspace), "-o", str(workspace / "nested.ssmdbook")],
+        ["speech", "annotate", str(workspace), "-o", str(workspace / "nested.ssmd-bundle")],
     )
     assert inside.exit_code == 1
     assert "outside the source workspace" in inside.output
-    assert not (workspace / "nested.ssmdbook").exists()
+    assert not (workspace / "nested.ssmd-bundle").exists()
 
-    output = tmp_path / "clean-copy.ssmdbook"
+    output = tmp_path / "clean-copy.ssmd-bundle"
     result = runner.invoke(app, ["speech", "annotate", str(workspace), "-o", str(output)])
     assert result.exit_code == 0, result.output
     output_book = load_book_bundle(output)

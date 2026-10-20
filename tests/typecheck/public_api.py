@@ -9,10 +9,13 @@ from ssmdconvert import (
     BookInspection,
     BookInspectionChapter,
     BookWorkspace,
+    BundleKind,
+    BundleWorkspace,
     CachedAnalysis,
     ConversionResult,
     Converter,
     DocumentConversionOptions,
+    LoadedBundle,
     MissingDependencyError,
     ProjectedText,
     SourceInfo,
@@ -36,14 +39,14 @@ from ssmdconvert import (
     freeze_speech,
     inspect_book,
     inspect_document,
-    load_book_bundle,
-    load_book_workspace,
+    load_bundle,
+    load_bundle_workspace,
     lookup_cached_context,
     lookup_change_context,
     project_text,
-    refresh_book_workspace,
-    validate_book_bundle,
-    write_book_bundle,
+    refresh_bundle_workspace,
+    validate_bundle,
+    write_bundle,
 )
 
 source = Path("book.epub")
@@ -75,12 +78,22 @@ source_parent: str | None = chapter.source_parent_id
 canonical_parent: str | None = chapter.parent_id
 source_hash: str = book.source_sha256
 source_chapter_count: int | None = book.source_chapter_count
-bundle: Path = write_book_bundle(book, Path("book.ssmdbook"), format="directory")
-loaded: Book = load_book_bundle(bundle)
-workspace: BookWorkspace = load_book_workspace(Path("book.ssmdbook"))
+bundle: Path = write_bundle(book, Path("book.ssmd-bundle"))
+loaded_bundle: LoadedBundle = load_bundle(bundle)
+assert loaded_bundle.kind == "book"
+assert isinstance(loaded_bundle.value, Book)
+workspace_bundle: BundleWorkspace = load_bundle_workspace(Path("book.ssmd-bundle"))
+assert workspace_bundle.kind == "book"
+workspace_value = workspace_bundle.value
+assert isinstance(workspace_value, BookWorkspace)
+workspace: BookWorkspace = workspace_value
 workspace_status: WorkspaceChapterStatus = workspace.chapters[0]
-refreshed_workspace: BookWorkspace = refresh_book_workspace(Path("book.ssmdbook"))
-validate_book_bundle(bundle)
+refreshed_bundle: BundleWorkspace = refresh_bundle_workspace(Path("book.ssmd-bundle"))
+assert refreshed_bundle.kind == "book"
+refreshed_value = refreshed_bundle.value
+assert isinstance(refreshed_value, BookWorkspace)
+refreshed_workspace: BookWorkspace = refreshed_value
+bundle_kind: BundleKind = validate_bundle(bundle)
 analysis_options = AnalysisOptions(chapters="all", spacy="off")
 projection_options = TextProjectionOptions(max_paragraph_chars=1000)
 analysis: SsmdAnalysis = analyze_ssmd(source, options=analysis_options)

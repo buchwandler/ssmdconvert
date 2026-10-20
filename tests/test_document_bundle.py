@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from ssmdconvert.document_bundle import (
+from ssmdconvert._document_bundle import (
     load_document_bundle,
     load_document_workspace,
     refresh_document_workspace,
@@ -39,8 +39,10 @@ def artifact(ssmd: str = SSMD) -> SsmdDocument:
 
 
 def test_directory_and_zip_roundtrip_and_canonical_members(tmp_path: Path) -> None:
-    directory = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
-    archive = write_document_bundle(artifact(), tmp_path / "story.ssmdoc.zip", format="zip")
+    directory = write_document_bundle(
+        artifact(), tmp_path / "story.ssmd-bundle", format="directory"
+    )
+    archive = write_document_bundle(artifact(), tmp_path / "story.ssmd-bundle.zip", format="zip")
 
     assert sorted(path.name for path in directory.iterdir()) == [
         "document.ssmd.md",
@@ -62,13 +64,13 @@ def test_directory_and_zip_roundtrip_and_canonical_members(tmp_path: Path) -> No
 
 
 def test_zip_publication_is_deterministic(tmp_path: Path) -> None:
-    one = write_document_bundle(artifact(), tmp_path / "one.ssmdoc.zip", format="zip")
-    two = write_document_bundle(artifact(), tmp_path / "two.ssmdoc.zip", format="zip")
+    one = write_document_bundle(artifact(), tmp_path / "one.ssmd-bundle.zip", format="zip")
+    two = write_document_bundle(artifact(), tmp_path / "two.ssmd-bundle.zip", format="zip")
     assert one.read_bytes() == two.read_bytes()
 
 
 def test_strict_loader_rejects_dirty_workspace_but_workspace_loads_it(tmp_path: Path) -> None:
-    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
+    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmd-bundle", format="directory")
     edited = SSMD.replace("Hello", "Hello again")
     (bundle / "document.ssmd.md").write_text(edited, encoding="utf-8")
 
@@ -83,7 +85,7 @@ def test_strict_loader_rejects_dirty_workspace_but_workspace_loads_it(tmp_path: 
 def test_refresh_preserves_manifest_mode_and_unreferenced_local_state(
     tmp_path: Path,
 ) -> None:
-    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
+    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmd-bundle", format="directory")
     manifest_path = bundle / "manifest.json"
     manifest_path.chmod(0o640)
     manifest_mode = stat.S_IMODE(manifest_path.stat().st_mode)
@@ -114,7 +116,7 @@ def test_refresh_preserves_manifest_mode_and_unreferenced_local_state(
 
 
 def test_forced_directory_replacement_removes_unrelated_stale_files(tmp_path: Path) -> None:
-    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
+    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmd-bundle", format="directory")
     (bundle / "stale.txt").write_text("stale", encoding="utf-8")
     with pytest.raises(DocumentBundleError, match="already exists"):
         write_document_bundle(artifact(), bundle, format="directory")
@@ -127,9 +129,9 @@ def test_forced_directory_replacement_removes_unrelated_stale_files(tmp_path: Pa
 def test_failed_forced_directory_replacement_restores_previous_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from ssmdconvert import document_bundle
+    from ssmdconvert import _document_bundle as document_bundle
 
-    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
+    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmd-bundle", format="directory")
     (bundle / "keep.txt").write_text("old bundle", encoding="utf-8")
     original_manifest = (bundle / "manifest.json").read_bytes()
     original_replace = document_bundle.os.replace
@@ -142,7 +144,7 @@ def test_failed_forced_directory_replacement_restores_previous_workspace(
         if (
             not failed
             and destination_path == bundle
-            and source_path.name.startswith(".story.ssmdoc.tmp-")
+            and source_path.name.startswith(".story.ssmd-bundle.tmp-")
         ):
             failed = True
             raise OSError("simulated final rename failure")
@@ -158,7 +160,7 @@ def test_failed_forced_directory_replacement_restores_previous_workspace(
 
 
 def test_directory_symlink_escape_is_rejected(tmp_path: Path) -> None:
-    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
+    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmd-bundle", format="directory")
     outside = tmp_path / "outside.ssmd.md"
     outside.write_text(SSMD, encoding="utf-8")
     (bundle / "document.ssmd.md").unlink()
@@ -172,7 +174,7 @@ def test_directory_symlink_escape_is_rejected(tmp_path: Path) -> None:
 
 
 def test_manifest_schema_and_content_corruption_are_rejected(tmp_path: Path) -> None:
-    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmdoc", format="directory")
+    bundle = write_document_bundle(artifact(), tmp_path / "story.ssmd-bundle", format="directory")
     manifest_path = bundle / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["document"]["id"] = "chapter-0001"
@@ -187,7 +189,7 @@ def test_manifest_schema_and_content_corruption_are_rejected(tmp_path: Path) -> 
 
 
 def test_zip_duplicate_names_and_symlinks_are_rejected(tmp_path: Path) -> None:
-    good = write_document_bundle(artifact(), tmp_path / "good.ssmdoc.zip", format="zip")
+    good = write_document_bundle(artifact(), tmp_path / "good.ssmd-bundle.zip", format="zip")
     duplicate = tmp_path / "duplicate.zip"
     with zipfile.ZipFile(good) as source, zipfile.ZipFile(duplicate, "w") as target:
         target.writestr("manifest.json", source.read("manifest.json"))

@@ -8,14 +8,9 @@ from typing import Any
 
 from ssmd import parse_structure
 
-from ..bundle import load_book_bundle, load_book_workspace
-from ..document_bundle import (
-    load_document_bundle,
-    load_document_workspace,
-    probe_bundle_format,
-)
+from ..bundle import load_bundle, load_bundle_workspace
 from ..errors import AnalysisSourceError
-from ..models import Book, SsmdDocument
+from ..models import Book, BookWorkspace, DocumentWorkspace, SsmdDocument
 from ..render import validate_ssmd_document
 from .fingerprints import content_fingerprint, sha256_bytes, sha256_file
 from .models import (
@@ -71,8 +66,9 @@ def loaded_source_from_book(
         )
     return LoadedSsmdSource(
         path=path,
-        kind="ssmdbook",
-        input_format="ssmdbook",
+        kind="bundle",
+        input_format="ssmd-bundle",
+        bundle_kind="book",
         title=_title(metadata),
         metadata=metadata,
         sections=tuple(sections),
@@ -113,8 +109,9 @@ def loaded_source_from_document(
     )
     return LoadedSsmdSource(
         path=path,
-        kind="ssmdoc",
-        input_format="ssmdoc",
+        kind="bundle",
+        input_format="ssmd-bundle",
+        bundle_kind="document",
         title=_title(metadata),
         metadata=metadata,
         sections=(section,),
@@ -127,7 +124,7 @@ def loaded_source_from_document(
 
 
 def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
-    """Load and validate a supported SSMD file, bundle, or editable workspace."""
+    """Load standalone SSMD or a canonical bundle workspace/archive."""
     requested = Path(source).expanduser()
     try:
         path = requested.resolve(strict=True)
@@ -137,71 +134,59 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
         ) from exc
 
     if path.is_dir():
+        if not path.name.endswith(".ssmd-bundle"):
+            raise AnalysisSourceError(f"expected an editable .ssmd-bundle workspace: {path}")
         try:
-            bundle_format = probe_bundle_format(path)
+            workspace = load_bundle_workspace(path)
         except Exception as exc:
-            raise AnalysisSourceError(f"could not inspect SSMD workspace {path}: {exc}") from exc
-        if bundle_format == "ssmdconvert.document":
-            try:
-                document_workspace = load_document_workspace(path)
-            except Exception as exc:
-                raise AnalysisSourceError(
-                    f"could not load SSMD document workspace {path}: {exc}"
-                ) from exc
+            raise AnalysisSourceError(
+                f"could not load SSMD bundle workspace {path}: {exc}"
+            ) from exc
+        if workspace.kind == "document":
+            document_workspace = workspace.value
+            assert isinstance(document_workspace, DocumentWorkspace)
             return loaded_source_from_document(
                 document_workspace.document,
                 path=path,
                 workspace_type="directory",
                 workspace_status="dirty" if document_workspace.dirty else "clean",
                 dirty=document_workspace.dirty,
-                actual_sha256=sha256_file(path / document_workspace.status.path),
+                actual_sha256=document_workspace.status.actual_sha256,
             )
-        if bundle_format == "ssmdconvert.book":
-            try:
-                book_workspace = load_book_workspace(path)
-            except Exception as exc:
-                raise AnalysisSourceError(
-                    f"could not load SSMD book workspace {path}: {exc}"
-                ) from exc
-            dirty = tuple(chapter.id for chapter in book_workspace.chapters if chapter.dirty)
-            chapter_hashes = {
-                chapter.id: chapter.actual_sha256 for chapter in book_workspace.chapters
-            }
-            return loaded_source_from_book(
-                book_workspace.book,
-                path=path,
-                workspace_type="directory",
-                workspace_status="dirty" if book_workspace.dirty else "clean",
-                dirty_chapters=dirty,
-                chapter_hashes=chapter_hashes,
-            )
-        raise AnalysisSourceError(f"unsupported SSMD workspace format in {path}: {bundle_format!r}")
-    if not path.is_file():
-        raise AnalysisSourceError(
-            f"SSMD source is not a regular file or workspace directory: {path}"
+        book_workspace = workspace.value
+        assert isinstance(book_workspace, BookWorkspace)
+        dirty = tuple(chapter.id for chapter in book_workspace.chapters if chapter.dirty)
+        chapter_hashes = {chapter.id: chapter.actual_sha256 for chapter in book_workspace.chapters}
+        return loaded_source_from_book(
+            book_workspace.book,
+            path=path,
+            workspace_type="directory",
+            workspace_status="dirty" if book_workspace.dirty else "clean",
+            dirty_chapters=dirty,
+            chapter_hashes=chapter_hashes,
         )
+
+    if not path.is_file():
+        raise AnalysisSourceError(f"SSMD source is not a regular file: {path}")
 
     lowered_name = path.name.lower()
-    if lowered_name.endswith(".ssmdbook") or lowered_name.endswith(".ssmdbook.zip"):
+    if lowered_name.endswith(".ssmd-bundle.zip"):
         try:
-            book = load_book_bundle(path)
+            loaded = load_bundle(path)
         except Exception as exc:
-            raise AnalysisSourceError(f"could not load SSMD book bundle {path}: {exc}") from exc
+            raise AnalysisSourceError(f"could not load packed SSMD bundle {path}: {exc}") from exc
+        if loaded.kind == "document":
+            assert isinstance(loaded.value, SsmdDocument)
+            return loaded_source_from_document(
+                loaded.value,
+                path=path,
+                workspace_type="zip",
+                workspace_status="valid",
+                artifact_sha256=sha256_file(path),
+            )
+        assert isinstance(loaded.value, Book)
         return loaded_source_from_book(
-            book,
-            path=path,
-            workspace_type="zip",
-            workspace_status="valid",
-            artifact_sha256=sha256_file(path),
-        )
-
-    if lowered_name.endswith((".ssmdoc", ".ssmdoc.zip")):
-        try:
-            document = load_document_bundle(path)
-        except Exception as exc:
-            raise AnalysisSourceError(f"could not load SSMD document bundle {path}: {exc}") from exc
-        return loaded_source_from_document(
-            document,
+            loaded.value,
             path=path,
             workspace_type="zip",
             workspace_status="valid",
@@ -210,7 +195,8 @@ def load_ssmd_source(source: str | Path) -> LoadedSsmdSource:
 
     if not (lowered_name.endswith(".ssmd") or lowered_name.endswith(".ssmd.md")):
         raise AnalysisSourceError(
-            f"unsupported SSMD source {path}; expected .ssmd, .ssmd.md, .ssmdbook, or .ssmdoc"
+            f"unsupported SSMD source {path}; expected .ssmd, .ssmd.md, "
+            ".ssmd-bundle, or .ssmd-bundle.zip"
         )
 
     try:

@@ -23,7 +23,7 @@ runner = CliRunner()
         ("speech", "audit"),
         ("speech", "annotate"),
         ("speech", "freeze"),
-        ("book", "convert"),
+        ("bundle", "convert"),
     ),
 )
 def test_analysis_cli_commands_expose_spacy_and_progress_flags(command: tuple[str, ...]) -> None:
@@ -82,12 +82,12 @@ def test_missing_explicit_spacy_model_fails_cleanly_without_partial_bundle(
 ) -> None:
     monkeypatch.setitem(sys.modules, "spacy", None)
     source = tmp_path / "book.epub"
-    output = tmp_path / "book.ssmdbook.zip"
+    output = tmp_path / "book.ssmd-bundle"
     make_epub(source)
 
     result = runner.invoke(
         app,
-        ["book", "convert", str(source), "--output", str(output), "--spacy", "sm"],
+        ["bundle", "convert", str(source), "--output", str(output), "--spacy", "sm"],
     )
 
     assert result.exit_code == 1

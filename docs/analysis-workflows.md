@@ -1,29 +1,19 @@
 # SSMD analysis and speech workflows
 
-`ssmdconvert` owns SSMD-specific source loading, chapter selection, language/context
-semantics, source mapping, reporting, TXT projection, and write-back. It uses the
-public `ttsready>=0.2.2,<0.3` Python API for source-neutral speech preparation and QA;
-`ttsready` is a core dependency. Generic analysis IDs and change provenance are
-reported without exposing replacement identities as application-specific rules.
+SSMDConvert owns SSMD-specific source loading, chapter selection, language and
+context semantics, source mapping, reporting, text projection, and safe
+write-back. It uses the public `ttsready` Python API for source-neutral speech
+preparation and QA.
 
-Conceptually, the layers are:
-
-```text
-spokenform → ttsready → ssmdconvert
-```
-
-`spokenform` handles linguistic normalization; `ttsready` provides generic preparation
-and QA; `ssmdconvert` owns SSMD application semantics and write-back. `ssmdconvert`
-depends directly on the public `ttsready` API, not on `spokenform`.
-
-The commands accept standalone `.ssmd`/`.ssmd.md` files, validated `.ssmdbook.zip`
-or `.ssmdoc.zip` artifacts, and editable `.ssmdbook/` or `.ssmdoc/` directories.
-Book selectors use original 1-based source chapter numbers and preserve source
-order; a document bundle exposes the single section `document-0001`.
+Reports, context lookup, TXT projection, and speech workflows accept standalone
+`.ssmd` or `.ssmd.md` files and canonical `.ssmd-bundle` directory or ZIP paths.
+The bundle manifest determines whether the source contains a book or document.
+Book chapter selection uses original one-based source numbers; a single document
+has the section ID `document-0001`.
 
 ## Python API and cache boundary
 
-The root Python facade composes the same SSMD analysis, projection, report, and
+The root Python facade composes the same analysis, projection, report, and
 speech materialization services as the CLI:
 
 ```python
@@ -37,7 +27,7 @@ from ssmdconvert import (
     project_text,
 )
 
-analysis = analyze_ssmd("chapter.ssmd", options=AnalysisOptions(spacy="off"))
+analysis = analyze_ssmd("notes.ssmd-bundle", options=AnalysisOptions(spacy="off"))
 projection = project_text(analysis, options=TextProjectionOptions(max_paragraph_chars=1000))
 report = build_report(analysis, projection=projection)
 if analysis.preparation.changes:
@@ -45,62 +35,50 @@ if analysis.preparation.changes:
 frozen = freeze_speech(analysis)  # returns rewritten section text; writes nothing
 ```
 
-`analyze_ssmd()` accepts a standalone SSMD or validated bundle/workspace path,
-and an in-memory `Book` or `BookConversionResult`; it writes no temporary
-bundle or cache. Reusing `projection` in `build_report()` keeps its statistics
-and prepared-output digest identical to the TXT projection. `audit_speech()`
-and `freeze_speech()` consume existing analysis and do not prepare it again.
+`analyze_ssmd()` accepts standalone SSMD, validated bundles, editable workspaces,
+and in-memory book models. It writes no temporary bundle or cache. Reusing a
+projection in `build_report()` keeps its statistics and prepared-output digest
+tied to the TXT result. `audit_speech()` and `freeze_speech()` consume existing
+analysis and do not prepare it again.
 
-Disk persistence has explicit names and controls. `analyze_cached(source, cache_root=..., refresh=...)` saves checksummed analysis records; it is the
-Python equivalent of the CLI report's persistent cache. Use
-`lookup_cached_context(source, change_id, cache_root=...)` for freshness-checked
-persisted context. Use `lookup_change_context(analysis_or_report, change_id)`
-when the typed evidence is already in memory and no cache lookup is wanted. See
-the [Python API reference](api.md) for complete signatures and result types.
+Persistent analysis uses explicit controls. `analyze_cached(source, cache_root=..., refresh=...)` saves checksummed records; `lookup_cached_context()`
+checks the current content item before returning context. Use
+`lookup_change_context()` when evidence is already in memory and no cache lookup
+is wanted.
 
-## Report
+## Reports and language
 
 ```bash
-ssmdconvert report BOOK.ssmdbook.zip --chapters 2-8
-ssmdconvert report chapter.ssmd --format json -o report.json
-ssmdconvert report BOOK.ssmdbook --fail-on-warning --refresh
+ssmdconvert report novel.ssmd-bundle.zip --chapters 2-8
+ssmdconvert report notes.ssmd --format json -o report.json
+ssmdconvert report novel.ssmd-bundle --fail-on-warning --refresh
 ```
 
-Markdown goes to stdout by default. Use `--format md|json` or let `-o` infer the
-format from `.md` or `.json`. Reports use the selected chapters for preparation,
-statistics, mapped changes, and TXT preview. `--show-raw-spans` adds raw SSMD
-mapping details to Markdown; `--fail-on-warning` emits the report and exits
-non-zero if a warning or error was reported. Each report run saves a source-level
-snapshot and may reuse compatible per-chapter preparation results. `--refresh`
-bypasses the chapter cache and reruns preparation for the selected sections.
+Markdown goes to stdout by default. `--format md|json` or `-o` selects output.
+Reports include selected-section statistics, mapped changes, and a TXT preview.
+`--show-raw-spans` adds mapping details. `--fail-on-warning` emits the report
+and returns a failing status when it contains a warning or error. `--refresh`
+bypasses cached preparation for selected sections and saves a fresh snapshot.
 
-`--language` sets the document base language for unscoped text. Inline SSMD language spans remain authoritative, with the innermost scope winning. Without a CLI override, language is resolved from SSMD section and book metadata. Unresolved language is reported; the tool does not silently assume English. `--sequence-fallback-mode`,
-`--max-paragraph-chars`, and `--include-titles/--no-include-titles` control the
-same preparation/projection options used by `txt`.
+`--language` sets the base language for unscoped text. Inline SSMD language
+spans remain authoritative, with the innermost scope winning. Without an
+explicit override, language is resolved from SSMD and bundle metadata. Unresolved
+language is reported rather than silently defaulted. `--sequence-fallback-mode`,
+`--max-paragraph-chars`, and `--include-titles` control preparation and
+projection.
 
-## Local spaCy enrichment
+## Local spaCy and progress
 
-Speech-preparation commands (`book convert`, `report`, `txt`, and `speech audit`,
-`annotate`, or `freeze`) accept `--spacy off|auto|sm|md|lg|trf`. The default is
-`off`. `auto` checks local models for each effective language in the preference
-order `sm`, `md`, `lg`, `trf`, then warns and continues without hints if none is
-available. Explicit tiers require their matching local model. Install
-`ssmdconvert[spacy]` and install models separately; for example,
-`python -m spacy download en_core_web_sm`. SSMDConvert never downloads spaCy or
-models during conversion.
+Bundle conversion, reports, TXT, and speech-preparation commands accept
+`--spacy off|auto|sm|md|lg|trf`; the default is `off`. `auto` checks locally
+installed models for each effective language and continues without hints if no
+compatible model is available. Explicit tiers require their local model.
+SSMDConvert never downloads spaCy or models.
 
-The analysis cache fingerprints the selected policy, provider/model identity,
-and spaCy/model versions. Changes invalidate incompatible chapter preparation;
-a compatible cache hit skips inference over the text.
-
-## Progress and output channels
-
-Long-running preparation commands accept `--progress` / `--no-progress`. By
-default, progress is enabled only when stderr is a terminal. A capable terminal
-uses Rich; explicitly requested progress otherwise uses concise plain stderr
-messages. Reports, TXT projections, and JSON stay on stdout. Python callbacks
-are synchronous and provider-neutral; callers own rendering, and callback
-exceptions propagate.
+Long-running commands accept `--progress` / `--no-progress`. Progress is
+automatic only when stderr is a terminal. Rich UI or concise plain status output
+is written to stderr; report, TXT, and JSON output remain on stdout. Python
+callbacks are synchronous and provider-neutral.
 
 ## Context lookup
 
@@ -108,63 +86,52 @@ First create a report so the generic change ID is in the local analysis cache,
 then request that ID for the same source:
 
 ```bash
-ssmdconvert report BOOK.ssmdbook.zip
-ssmdconvert context BOOK.ssmdbook.zip chg:v1:0123456789abcdef0123456789abcdef
-ssmdconvert context BOOK.ssmdbook.zip chg:v1:0123456789abcdef0123456789abcdef --paragraph --json
+ssmdconvert report novel.ssmd-bundle.zip
+ssmdconvert context novel.ssmd-bundle.zip chg:v1:0123456789abcdef0123456789abcdef
+ssmdconvert context novel.ssmd-bundle.zip chg:v1:0123456789abcdef0123456789abcdef --paragraph --json
 ```
 
-`context` checks the current bytes of the affected chapter before returning a cached
-result. Editing that chapter makes its old analysis stale; rerun the report with, for
-example, `ssmdconvert report SOURCE --refresh`, and use the change ID from the new
-report. Unrelated chapter edits do not invalidate a change's chapter context.
-Mixed-language paragraphs are shown as whole paragraphs so language boundaries
-remain clear. `--bug-report` adds reproducibility fingerprints and unit text; review
-it for sensitive content before sharing.
+Context checks the current bytes of the affected chapter or document before
+returning cached data. Editing that item makes its old analysis stale; rerun the
+report with `--refresh` and use the new change ID. Unrelated chapter edits do not
+invalidate another chapter's context. Mixed-language paragraphs are shown as
+whole paragraphs. Review `--bug-report` output for sensitive text before sharing.
 
 ## TXT projection
 
 ```bash
-ssmdconvert txt BOOK.ssmdbook.zip --chapters 2-8 -o prepared.txt
-ssmdconvert txt chapter.ssmd --no-include-titles
+ssmdconvert txt novel.ssmd-bundle.zip --chapters 2-8 -o prepared.txt
+ssmdconvert txt notes.ssmd --no-include-titles
 ```
 
-The output is the generic prepared plain-text projection used by the report
-preview and statistics. It is not a substitute for SSMD: it contains no SSMD
-annotations. Output goes to stdout unless `-o` is given. Existing destinations
-are refused unless `--force` is supplied; the input is never a valid output.
+TXT is the generic prepared plain-text projection used by report previews and
+statistics, not a substitute for SSMD: annotations are not included. Output goes
+to stdout unless `-o` is given. Existing destinations require `--force`; the
+input is never a valid output path.
 
 ## Speech audit, annotate, and freeze
 
 ```bash
-ssmdconvert speech audit chapter.ssmd --json
-ssmdconvert speech annotate chapter.ssmd -o annotated.ssmd
-ssmdconvert speech freeze BOOK.ssmdbook.zip --chapters 2-8 -o frozen.ssmdbook.zip
+ssmdconvert speech audit notes.ssmd --json
+ssmdconvert speech annotate notes.ssmd -o annotated.ssmd
+ssmdconvert speech freeze novel.ssmd-bundle.zip --chapters 2-8 -o frozen.ssmd-bundle.zip
 ```
 
-`audit` is read-only and uses the same analysis pipeline and generic change IDs
-as `report`. `annotate` and `freeze` materialize eligible automatic decisions as
-explicit SSMD substitutions. They share the validated mapping and write path;
-materialization verifies parser-owned source spans, rejects unsafe/overlapping
-edits, and preserves visible text. Existing authoritative SSMD speech semantics
-are not duplicated. Unresolved effective language or unsafe mapping prevents
+Audit is read-only and uses the same analysis pipeline and generic change IDs as
+reporting. Annotation and freeze materialize eligible automatic decisions as
+explicit SSMD substitutions. They validate source spans, reject unsafe or
+overlapping edits, and preserve visible text. Existing authoritative
+annotations are not duplicated; unresolved language or unsafe mappings prevent
 write-back.
 
-Speech writes require a new destination by default. Standalone SSMD, book, and document
-outputs are written atomically, existing destinations require `--force`, and the
-input cannot be overwritten even with `--force`. Dirty directory workspaces are
-read as-is, but output must be outside the source workspace; selected chapters
-are updated in the new bundle while unselected chapters remain unchanged. For
-bundle destinations use `.ssmdbook`/`.ssmdoc` for a directory or `.ssmdbook.zip`/`.ssmdoc.zip` for a ZIP,
-or pass `--format directory|zip`.
+Speech writes require a new destination by default, use atomic publication, and
+never mutate a workspace in place. A dirty directory workspace can be read as-is;
+selected items are written to the new bundle and unselected book chapters remain
+unchanged. See [Bundle workspaces](bundles.md) for the canonical artifact and
+workspace rules.
 
 ## Cache and data handling
 
-Reports create checksummed, versioned analysis snapshots in the user cache.
-See [Analysis cache](analysis-cache.md) for the location, retention, freshness,
-and removal details.
-
-## Command migration
-
-The old `ttsready` CLI is not part of this workflow. See
-[Migration from the ttsready CLI](migration-from-ttsready-cli.md) for direct
-command replacements and commands that are intentionally not migrated.
+Reports create checksummed, versioned analysis snapshots in the user cache. See
+[Analysis cache](analysis-cache.md) for the location, retention, freshness, and
+removal details.

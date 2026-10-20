@@ -93,9 +93,16 @@ def main() -> None:
         raise RuntimeError("core package import eagerly loaded speech internals")
 
     entrypoint_help = _console_help()
-    if not all(command in entrypoint_help for command in ("report", "context", "txt", "speech")):
-        raise RuntimeError("installed ssmdconvert entry point is missing analysis commands")
-
+    if not all(
+        command in entrypoint_help for command in ("bundle", "report", "context", "txt", "speech")
+    ):
+        raise RuntimeError(
+            "installed ssmdconvert entry point is missing bundle or analysis commands"
+        )
+    bundle_help = _run(Path.cwd(), "bundle", "--help")
+    bundle_commands = ("inspect", "convert", "metadata", "refresh", "pack", "validate")
+    if not all(command in bundle_help for command in bundle_commands):
+        raise RuntimeError("installed bundle command group is incomplete")
     with tempfile.TemporaryDirectory(prefix="ssmdconvert-smoke-") as temporary_dir:
         workdir = Path(temporary_dir)
         for name, content in (
@@ -113,13 +120,15 @@ def main() -> None:
         epub = workdir / "sample.epub"
         _write_epub(epub)
         _run(workdir, "convert", str(epub), "-o", str(workdir / "combined.ssmd"))
-        inspection = json.loads(_run(workdir, "book", "inspect", str(epub), "--json"))
-        if inspection["source"]["format"] != "epub" or not inspection["chapters"]:
-            raise RuntimeError("installed book inspection returned an unexpected result")
+        inspection = json.loads(_run(workdir, "bundle", "inspect", str(epub), "--json"))
+        if inspection["source"] != str(epub) or not inspection["chapters"]:
+            raise RuntimeError("installed bundle inspection returned an unexpected result")
 
-        bundle = workdir / "sample.ssmdbook.zip"
-        _run(workdir, "book", "convert", str(epub), "-o", str(bundle))
-        validation = json.loads(_run(workdir, "book", "validate", str(bundle), "--json"))
+        workspace = workdir / "sample.ssmd-bundle"
+        _run(workdir, "bundle", "convert", str(epub), "-o", str(workspace))
+        bundle = workdir / "sample.ssmd-bundle.zip"
+        _run(workdir, "bundle", "pack", str(workspace), "-o", str(bundle))
+        validation = json.loads(_run(workdir, "bundle", "validate", str(bundle), "--json"))
         if not validation["valid"]:
             raise RuntimeError("installed bundle validation failed")
         ssmd_source = workdir / "sample.ssmd"

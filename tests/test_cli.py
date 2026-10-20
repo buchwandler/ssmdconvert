@@ -12,7 +12,7 @@ from ssmd import parse_structure
 from typer.testing import CliRunner
 
 from ssmdconvert import cli as cli_module
-from ssmdconvert import load_book_bundle
+from ssmdconvert._book_bundle import load_book_bundle
 from ssmdconvert.cli import app
 
 runner = CliRunner()
@@ -55,76 +55,40 @@ def test_real_command_groups_and_subcommand_help() -> None:
             "report",
             "context",
             "txt",
-            "book",
-            "document",
+            "bundle",
             "speech",
         ),
-        ("convert", "--help"): (
-            "--force",
-            "-l, --language",
-            "--metadata-file",
-            "--output",
-            "--sequence-fallback-mode",
+        ("bundle", "--help"): (
+            "inspect",
+            "convert",
+            "metadata",
+            "refresh",
+            "pack",
+            "validate",
         ),
-        ("report", "--help"): (
+        ("bundle", "inspect", "--help"): ("--json",),
+        ("bundle", "convert", "--help"): (
             "--chapters",
-            "--language",
-            "--max-paragraph-chars",
-            "--include-titles",
-            "--format",
-            "--output",
-            "--fail-on-warning",
-            "--refresh",
-        ),
-        ("context", "--help"): ("--paragraph", "--json", "--bug-report"),
-        ("txt", "--help"): (
-            "--chapters",
-            "--language",
-            "--max-paragraph-chars",
-            "--include-titles",
-            "--output",
-        ),
-        ("speech", "--help"): ("audit", "annotate", "freeze"),
-        ("speech", "audit", "--help"): ("--chapters", "--language", "--json", "--fail-on-warning"),
-        ("speech", "annotate", "--help"): ("--output", "--chapters", "--format", "--force"),
-        ("speech", "freeze", "--help"): (
-            "--output",
-            "--chapters",
-            "--format",
-            "--force",
-            "--report",
-            "--json",
-        ),
-        ("book", "--help"): ("inspect", "convert", "validate", "metadata"),
-        ("book", "inspect", "--help"): ("--json",),
-        ("book", "convert", "--help"): (
-            "--chapters",
-            "--format",
             "--force",
             "--language",
             "--metadata-file",
             "--sequence-fallback-mode",
-            "--report",
-            "--json",
+            "--report-output",
+            "--report-format",
         ),
-        ("book", "metadata", "--help"): ("--json",),
-        ("book", "validate", "--help"): ("--json",),
-        ("document", "--help"): ("convert", "inspect", "metadata", "refresh", "pack", "validate"),
-        ("document", "convert", "--help"): (
-            "--output",
-            "--metadata-file",
-            "--title",
-            "--author",
-            "--language",
-            "--sequence-fallback-mode",
-            "--format",
-            "--force",
-        ),
+        ("bundle", "metadata", "--help"): ("--json",),
+        ("bundle", "validate", "--help"): ("--json",),
+        ("speech", "annotate", "--help"): ("--output", "--chapters", "--force"),
+        ("speech", "freeze", "--help"): ("--output", "--chapters", "--report", "--json"),
     }
     for args, expected in expected_commands.items():
         result = runner.invoke(app, list(args))
         assert result.exit_code == 0, result.output
         assert all(item in unstyle(result.output) for item in expected)
+
+    for removed_group in ("book", "document"):
+        result = runner.invoke(app, [removed_group, "--help"])
+        assert result.exit_code != 0
 
 
 def test_convert_refuses_collisions_and_force_replaces_atomically(tmp_path: Path) -> None:
@@ -177,54 +141,77 @@ def test_failed_atomic_text_write_preserves_existing_output(
     assert not list(tmp_path.glob(".result.ssmd.tmp-*"))
 
 
-def test_book_subcommands_json_and_bundle_format_inference(tmp_path: Path) -> None:
+def test_bundle_commands_inspect_convert_validate_and_pack(tmp_path: Path) -> None:
     source = tmp_path / "novel.epub"
     make_epub(source, nested_navigation=True)
 
-    inspection = runner.invoke(app, ["book", "inspect", str(source), "--json"])
+    inspection = runner.invoke(app, ["bundle", "inspect", str(source), "--json"])
     assert inspection.exit_code == 0, inspection.output
     payload = json.loads(inspection.output)
-    assert payload["source"]["format"] == "epub"
-    assert payload["source"]["name"] == source.name
-    assert payload["chapters"][1]["source_parent_id"] == payload["chapters"][0]["source_id"]
-    assert payload["chapters"][1]["parent_id"] == payload["chapters"][0]["id"]
+    assert payload["kind"] == "book"
+    assert [chapter["source_number"] for chapter in payload["chapters"]] == [1, 2, 3, 4]
 
-    output = tmp_path / "novel.ssmdbook.zip"
+    output = tmp_path / "novel.ssmd-bundle"
     converted = runner.invoke(
         app,
-        ["book", "convert", str(source), "--chapters", "2,1", "-o", str(output)],
+        [
+            "bundle",
+            "convert",
+            str(source),
+            "--chapters",
+            "2,1",
+            "--speech-semantics",
+            "preserve",
+            "-o",
+            str(output),
+        ],
     )
     assert converted.exit_code == 0, converted.output
     assert [chapter.source_number for chapter in load_book_bundle(output).chapters] == [1, 2]
 
-    args = ["book", "convert", str(source), "--chapters", "2,1", "-o", str(output)]
-    refused = runner.invoke(app, args)
-    assert refused.exit_code == 1
-    assert "already exists" in refused.output
+    validated = runner.invoke(app, ["bundle", "validate", str(output), "--json"])
+    assert validated.exit_code == 0, validated.output
+    assert json.loads(validated.output)["kind"] == "book"
 
-    forced = runner.invoke(app, [*args, "--force"])
+    archive = tmp_path / "novel.ssmd-bundle.zip"
+    packed = runner.invoke(app, ["bundle", "pack", str(output), "-o", str(archive)])
+    assert packed.exit_code == 0, packed.output
+    assert [chapter.source_number for chapter in load_book_bundle(archive).chapters] == [1, 2]
+
+    duplicate = runner.invoke(app, ["bundle", "convert", str(source), "-o", str(output)])
+    assert duplicate.exit_code == 1
+    assert "already exists" in duplicate.output
+    forced = runner.invoke(
+        app,
+        [
+            "bundle",
+            "convert",
+            str(source),
+            "--speech-semantics",
+            "preserve",
+            "-o",
+            str(output),
+            "--force",
+        ],
+    )
     assert forced.exit_code == 0, forced.output
 
-    validated = runner.invoke(app, ["book", "validate", str(output), "--json"])
-    assert validated.exit_code == 0, validated.output
-    assert json.loads(validated.output) == {"valid": True, "bundle": str(output)}
 
-
-def test_book_convert_rejects_ambiguous_output_and_same_input(tmp_path: Path) -> None:
+def test_bundle_convert_rejects_noncanonical_output_and_same_input(tmp_path: Path) -> None:
     source = tmp_path / "novel.epub"
     make_epub(source)
 
-    ambiguous = runner.invoke(
+    noncanonical = runner.invoke(
         app,
-        ["book", "convert", str(source), "-o", str(tmp_path / "book.zip")],
+        ["bundle", "convert", str(source), "-o", str(tmp_path / "book.zip")],
     )
-    assert ambiguous.exit_code != 0
-    assert "cannot infer bundle format" in ambiguous.output
+    assert noncanonical.exit_code == 1
+    assert "must end with '.ssmd-bundle'" in noncanonical.output
     assert not (tmp_path / "book.zip").exists()
 
     same_path = runner.invoke(
         app,
-        ["book", "convert", str(source), "-o", str(source), "--format", "zip", "--force"],
+        ["bundle", "convert", str(source), "-o", str(source), "--force"],
     )
     assert same_path.exit_code == 1
     assert "must not be the input file" in same_path.output
@@ -299,19 +286,19 @@ def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
 
     book_source = tmp_path / "book.epub"
     make_epub(book_source)
-    book_default_path = tmp_path / "default.ssmdbook"
+    book_default_path = tmp_path / "default.ssmd-bundle"
     book_default = runner.invoke(
         app,
-        ["book", "convert", str(book_source), "--output", str(book_default_path)],
+        ["bundle", "convert", str(book_source), "--output", str(book_default_path)],
     )
     assert book_default.exit_code == 0, book_default.output
     assert load_book_bundle(book_default_path).metadata["sequence_fallback_mode"] == "preserve"
 
-    book_spell_path = tmp_path / "spell.ssmdbook"
+    book_spell_path = tmp_path / "spell.ssmd-bundle"
     book_spell = runner.invoke(
         app,
         [
-            "book",
+            "bundle",
             "convert",
             str(book_source),
             "--output",
@@ -322,11 +309,11 @@ def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
     )
     assert book_spell.exit_code == 0, book_spell.output
     assert load_book_bundle(book_spell_path).metadata["sequence_fallback_mode"] == "spell"
-    book_preserve_path = tmp_path / "preserve.ssmdbook"
+    book_preserve_path = tmp_path / "preserve.ssmd-bundle"
     book_preserve = runner.invoke(
         app,
         [
-            "book",
+            "bundle",
             "convert",
             str(book_source),
             "--output",
@@ -341,7 +328,7 @@ def test_sequence_fallback_mode_cli_default_preserve_and_invalid_values(
     invalid_book = runner.invoke(
         app,
         [
-            "book",
+            "bundle",
             "convert",
             str(book_source),
             "--sequence-fallback-mode",
@@ -357,9 +344,9 @@ def test_cli_help_uses_stacked_layout_on_narrow_terminals(terminal_width: int) -
     help_commands = [
         ["--help"],
         ["convert", "--help"],
-        ["book", "--help"],
-        ["book", "convert", "--help"],
-        ["book", "metadata", "--help"],
+        ["bundle", "--help"],
+        ["bundle", "convert", "--help"],
+        ["bundle", "metadata", "--help"],
     ]
     for args in help_commands:
         result = runner.invoke(app, args, terminal_width=terminal_width)
@@ -371,13 +358,13 @@ def test_cli_help_uses_stacked_layout_on_narrow_terminals(terminal_width: int) -
     assert root_lines[convert_index + 1].startswith("      ")
     assert root_lines[convert_index + 1].strip()
 
-    book_help = runner.invoke(app, ["book", "--help"], terminal_width=terminal_width)
-    book_lines = book_help.output.splitlines()
-    metadata_command_index = book_lines.index("  metadata")
-    assert book_lines[metadata_command_index + 1].startswith("      ")
-    assert book_lines[metadata_command_index + 1].strip()
+    bundle_help = runner.invoke(app, ["bundle", "--help"], terminal_width=terminal_width)
+    bundle_lines = bundle_help.output.splitlines()
+    metadata_command_index = bundle_lines.index("  metadata")
+    assert bundle_lines[metadata_command_index + 1].startswith("      ")
+    assert bundle_lines[metadata_command_index + 1].strip()
 
-    for args in (["convert", "--help"], ["book", "convert", "--help"]):
+    for args in (["convert", "--help"], ["bundle", "convert", "--help"]):
         result = runner.invoke(app, args, terminal_width=terminal_width)
         lines = result.output.splitlines()
         option_index = next(
@@ -386,8 +373,12 @@ def test_cli_help_uses_stacked_layout_on_narrow_terminals(terminal_width: int) -
             if line.strip().startswith("--sequence-fallback-mode ")
         )
         assert "[default:" not in lines[option_index]
-        assert lines[option_index + 1].lstrip().startswith("[default:")
-        assert len(lines[option_index + 1]) - len(lines[option_index + 1].lstrip()) >= 6
+        if args[0] == "convert":
+            assert "[default:" not in lines[option_index]
+            assert lines[option_index + 1].lstrip().startswith("[default:")
+            assert len(lines[option_index + 1]) - len(lines[option_index + 1].lstrip()) >= 6
+        else:
+            assert all("[default:" not in line for line in lines[option_index : option_index + 2])
         metadata_index = next(
             index for index, line in enumerate(lines) if line.strip().startswith("--metadata-file ")
         )

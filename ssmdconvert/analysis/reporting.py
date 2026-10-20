@@ -154,6 +154,8 @@ def build_analysis_report(
     return SsmdAnalysisReport(
         source=SourceReport(
             path=str(source.path.resolve()),
+            kind=source.kind,
+            bundle_kind=source.bundle_kind,
             input_format=source.input_format,
             title=source.title,
             source_sha256=source.source_sha256,
@@ -288,7 +290,7 @@ def render_markdown_report(
 ) -> str:
     """Render the ordered human-facing ssmdconvert report sections."""
     stats = report.preparation.stats
-    dirty_label = "Dirty document" if report.source.input_format == "ssmdoc" else "Dirty chapters"
+    dirty_label = "Dirty document" if report.source.bundle_kind == "document" else "Dirty chapters"
     unit_contexts = {
         unit_id: context.id for context in report.contexts for unit_id in context.unit_ids
     }
@@ -310,6 +312,8 @@ def render_markdown_report(
         "## Source",
         "",
         f"- Path: `{_cell(report.source.path)}`",
+        f"- Kind: {_cell(report.source.kind)}",
+        f"- Bundle kind: {_cell(report.source.bundle_kind or 'not applicable')}",
         f"- Input format: {_cell(report.source.input_format)}",
         f"- Document title: {_cell(report.source.title or 'not set')}",
         f"- Source SHA-256: `{report.source.source_sha256}`",

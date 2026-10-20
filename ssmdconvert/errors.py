@@ -2,6 +2,10 @@ class SSMDConvertError(Exception):
     """Base error."""
 
 
+class BundleIdentityError(SSMDConvertError):
+    """A bundle path or manifest cannot be safely identified."""
+
+
 class UnsupportedInputError(SSMDConvertError):
     """No input adapter accepts the source."""
 

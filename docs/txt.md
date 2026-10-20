@@ -6,7 +6,7 @@ TXT preview and statistics.
 
 ```bash
 ssmdconvert txt SOURCE
-ssmdconvert txt BOOK.ssmdbook.zip --chapters 2-8 -o prepared.txt
+ssmdconvert txt BOOK.ssmd-bundle.zip --chapters 2-8 -o prepared.txt
 ssmdconvert txt SOURCE --language de-DE --no-include-titles
 ```
 

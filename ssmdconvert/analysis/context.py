@@ -8,7 +8,7 @@ from typing import Any
 
 import ttsready
 
-from ..bundle import read_current_section_bytes
+from ..bundle import read_current_bundle_item_bytes
 from ..errors import AnalysisCacheError, ContextLookupError
 from .cache import AnalysisCache
 from .fingerprints import sha256_bytes
@@ -45,7 +45,10 @@ def lookup_context(
     if section_entry is None:
         raise AnalysisCacheError(f"cached change {change_id!r} references an unselected section")
     try:
-        current_bytes = read_current_section_bytes(source, section_id)
+        if snapshot["source"]["kind"] == "ssmd":
+            current_bytes = Path(source).read_bytes()
+        else:
+            current_bytes = read_current_bundle_item_bytes(source, section_id)
     except Exception as exc:
         raise ContextLookupError(
             f"Analysis cache is stale for {section_id}. "
@@ -119,6 +122,8 @@ def lookup_context(
         raise AnalysisCacheError(f"cached change {change_id!r} has malformed provenance")
 
     result: dict[str, Any] = {
+        "source_kind": snapshot["source"]["kind"],
+        "bundle_kind": snapshot["source"].get("bundle_kind"),
         "schema": "ssmdconvert.context.v1",
         "analysis_id": snapshot["analysis_id"],
         "content_fingerprint": snapshot["source"]["content_fingerprint"],

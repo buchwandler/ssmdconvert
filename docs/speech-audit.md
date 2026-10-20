@@ -4,7 +4,7 @@ Audit automatic speech-preparation changes without modifying SSMD.
 
 ```bash
 ssmdconvert speech audit SOURCE
-ssmdconvert speech audit BOOK.ssmdbook.zip --chapters 3 --json
+ssmdconvert speech audit BOOK.ssmd-bundle.zip --chapters 3 --json
 ssmdconvert speech audit SOURCE --language en-US --fail-on-warning
 ```
 

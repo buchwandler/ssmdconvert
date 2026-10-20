@@ -55,5 +55,5 @@ python -m pip install -e ".[dev]"
 ```bash
 ssmdconvert --version
 ssmdconvert --help
-ssmdconvert book --help
+ssmdconvert bundle --help
 ```

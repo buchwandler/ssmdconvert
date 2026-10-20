@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ssmdconvert"
 dynamic = ["version"]
-description = "Deterministically convert documents and books into SSMD."
+description = "Deterministically convert documents and books into SSMD bundles."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

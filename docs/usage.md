@@ -1,37 +1,60 @@
 # CLI usage
 
-## Convert a document
+SSMDConvert uses one bundle lifecycle for EPUB books, ordinary documents, and
+existing SSMD sources. Every editable workspace ends in `.ssmd-bundle`; a packed
+archive ends in `.ssmd-bundle.zip`.
+
+## Convert, inspect, and validate
 
 ```bash
-ssmdconvert convert INPUT [-o OUTPUT] [--title TITLE] [--author AUTHOR] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve]
+ssmdconvert bundle inspect novel.epub --json
+ssmdconvert bundle convert novel.epub --chapters 2-20 -o novel.ssmd-bundle
+ssmdconvert bundle convert notes.md -o notes.ssmd-bundle
+ssmdconvert bundle convert reviewed.ssmd.md
+ssmdconvert bundle validate novel.ssmd-bundle
 ```
 
-Examples:
+When `-o` is omitted, `bundle convert` creates an editable workspace beside the
+source. Existing outputs are refused unless `--force` is supplied; forced
+workspace publication replaces the complete directory atomically.
+
+`--chapters` accepts original one-based book chapter numbers, as a number, a
+range, a comma-separated list, or a mixture such as `1,3-5`. It defaults to
+`all`. A non-default selector is not valid for a single-document source.
+
+The lifecycle group contains six commands:
+
+```text
+ssmdconvert bundle inspect SOURCE
+ssmdconvert bundle convert SOURCE
+ssmdconvert bundle metadata BUNDLE [--json]
+ssmdconvert bundle refresh WORKSPACE [--check]
+ssmdconvert bundle pack WORKSPACE [-o ARCHIVE]
+ssmdconvert bundle validate BUNDLE [--json]
+```
+
+Only directory workspaces can be refreshed or packed. ZIP archives are
+read-only. `refresh --check` does not write; `pack` creates a deterministic
+archive without refreshing or otherwise changing the workspace.
+
+## Standalone SSMD conversion
+
+The top-level converter remains available for writing one standalone SSMD file:
 
 ```bash
 ssmdconvert convert manuscript.txt -o manuscript.ssmd
-ssmdconvert convert novel.md -o novel.ssmd
-ssmdconvert convert page.html -o page.ssmd
-ssmdconvert convert book.epub -o book.ssmd
 ssmdconvert convert report.pdf -o report.ssmd
-ssmdconvert convert manuscript.docx -o manuscript.ssmd
-ssmdconvert convert existing.ssmd.md -o normalized.ssmd
+ssmdconvert inspect manuscript.md --json
 ```
 
-PDF and DOCX require the `[pdf]` and `[docx]` extras. SSMD detection accepts `.ssmd` and `.ssmd.md` case-insensitively. If `-o` is omitted, the output is written beside the input with a `.ssmd` suffix.
+PDF and DOCX inputs require the matching optional extras. Writes are atomic and
+refuse existing outputs unless `--force` is supplied. The input file is never a
+valid output destination.
 
-Writes are atomic and refuse existing destinations unless `--force` is supplied. The input path is never accepted as the output, even with `--force`. A failed write leaves a prior output intact.
-
-Optional metadata can be supplied during conversion:
-
-```bash
-ssmdconvert convert manuscript.txt \
-  --title "Example" \
-  --author "A. Writer" \
-  -l en
-```
-
-Pass a UTF-8 YAML mapping with `--metadata-file PATH` to either `convert` or `book convert` for nested portable metadata and bibliographic overrides. Values are JSON-compatible; only supported metadata keys are accepted. Metadata precedence is source, file, then explicit CLI values. The effective sequence fallback option is applied last.
+Conversion commands accept `--metadata-file PATH` for a UTF-8 YAML mapping.
+Metadata precedence is source, file, and explicit CLI values. The sequence
+fallback mode defaults to `preserve`; the option is available when a caller
+needs `spell`.
 
 ```yaml
 language: de-DE
@@ -40,100 +63,29 @@ voice_defaults:
     rate: slow
 ```
 
-The sequence fallback policy controls residual sequence handling for downstream speech preparation. New conversions default to `preserve`; pass `--sequence-fallback-mode spell` to select `spell` explicitly. The chosen value is persisted in SSMD front matter and, for books, in manifest metadata and every chapter. This writer default does not change consumer behavior for legacy files or bundles where the field is absent.
+## Reports and speech workflows
 
 ```bash
-ssmdconvert convert manuscript.md -o manuscript.ssmd
-ssmdconvert book convert novel.epub -l de-DE -o novel.ssmdbook
+ssmdconvert report novel.ssmd-bundle.zip --chapters 2-8 --format json
+ssmdconvert context novel.ssmd-bundle chg:v1:0123456789abcdef0123456789abcdef
+ssmdconvert txt notes.ssmd-bundle -o prepared.txt
+ssmdconvert speech audit notes.ssmd-bundle --json
+ssmdconvert speech annotate notes.ssmd-bundle -o annotated.ssmd-bundle
+ssmdconvert speech freeze novel.ssmd-bundle.zip -o frozen.ssmd-bundle.zip
 ```
 
-## Inspect a source
-
-Inspect the selected local adapter and normalized document without writing output:
-
-```bash
-ssmdconvert inspect book.epub
-ssmdconvert inspect book.epub --json
-```
-
-JSON output includes the source path, selected adapter, normalized metadata, and section identifiers, titles, character counts, and source references.
-
-## EPUB book commands
-
-The book CLI uses explicit subcommands:
-
-```bash
-ssmdconvert book inspect novel.epub [--json]
-ssmdconvert book convert novel.epub [--chapters SELECTOR] [-o OUTPUT] [-l|--language LANGUAGE] [--metadata-file PATH] [--sequence-fallback-mode spell|preserve] [--speech-semantics freeze|preserve] [--report PATH] [--json] [--spacy off|auto|sm|md|lg|trf] [--progress|--no-progress]
-ssmdconvert book validate BUNDLE [--json]
-ssmdconvert book metadata BUNDLE [--json]
-```
-
-Selectors use original 1-based source chapter numbers. They accept a single number, a range, a comma-separated list, or a mixture such as `1,3-5`. Selected chapters remain in original source order.
-
-Book conversion defaults to `--speech-semantics freeze`, using upstream speech decisions to add exact SSMD `sub` annotations without changing visible text. Freeze requires a resolvable language; provide `-l/--language` for unscoped/base text or select `--speech-semantics preserve` for structural-only output. Inline SSMD language spans remain authoritative, with the innermost nested scope taking precedence over the CLI/base language; existing author-owned speech annotations remain authoritative.
-
-Book output format is inferred only from `.ssmdbook` (directory) and `.ssmdbook.zip` (ZIP). For other names, specify `--format directory` or `--format zip`. Existing bundles are refused unless `--force` is supplied. A forced directory output replaces the complete previous directory; stale files are not merged into the new bundle.
-
-Use `ssmdconvert book metadata BUNDLE` to display validated metadata stored in either a directory or ZIP bundle. Add `--json` for a deterministic `{"metadata": ...}` object. The human form labels absent known values as `not set` and renders nested values indented.
-
-## Single-document workspaces
-
-Use `document convert` to create a managed single-document workspace without changing the standalone behavior of top-level `convert`:
-
-```bash
-ssmdconvert document convert story.ssmd.md
-ssmdconvert document convert story.ssmd.md -o reviewed.ssmdoc.zip
-ssmdconvert document metadata reviewed.ssmdoc.zip --json
-ssmdconvert document validate reviewed.ssmdoc
-ssmdconvert document refresh reviewed.ssmdoc --check
-ssmdconvert document pack reviewed.ssmdoc -o reviewed.ssmdoc.zip
-```
-
-Directory `.ssmdoc` workspaces are editable; ZIP artifacts are strict and portable. A valid SSMD source is preserved byte-for-byte when no metadata override is requested. Dirty workspaces can be analyzed using current valid text, refreshed explicitly, or packed without modifying the workspace. See [Single-document SSMD workspaces](documents.md) and [`.ssmdoc` bundle format](document-bundle-format.md) for details.
-
-## SSMD analysis and speech commands
-
-Use the shared SSMD-aware analysis commands for reports, context lookup, prepared TXT, and speech write-back:
-
-```bash
-ssmdconvert report SOURCE [--chapters SELECTOR] [--format md|json] [--refresh]
-ssmdconvert context SOURCE CHANGE_ID [--paragraph] [--json]
-ssmdconvert txt SOURCE [--chapters SELECTOR] [-o OUTPUT]
-ssmdconvert speech audit SOURCE [--json]
-ssmdconvert speech annotate SOURCE -o OUTPUT
-ssmdconvert speech freeze SOURCE -o OUTPUT [--report PATH] [--json]
-```
-
-Report, TXT, speech audit/annotate/freeze, and book conversion accept
-`--spacy off|auto|sm|md|lg|trf`; `off` is the default. They also accept
-`--progress/--no-progress`, with automatic progress only when stderr is a TTY.
-Rich UI or plain status output goes to stderr, leaving report, TXT, and JSON
-stdout clean.
-The commands accept standalone SSMD, validated ZIP bundles, and directory workspaces. Reports and TXT share a projection; `context` resolves a generic change ID from a report cache. `speech audit` is read-only. Annotation and freeze write to a new destination by default, preserve visible text, and refuse to modify a source workspace in place. Existing output requires `--force`; the input cannot be overwritten. See [SSMD analysis and speech workflows](analysis-workflows.md) for language handling, cache freshness, workspace policy, and migration from the removed `ttsready` CLI.
-
-`speech audit --json` emits a versioned per-change mapping summary. `speech freeze` and `book convert` print applied/already-authoritative/author-owned/unresolved counts; add `--json` to emit the versioned freeze report or `--report PATH` to save it. An incomplete freeze exits non-zero without publishing SSMD output; an explicitly requested report describes the incomplete result.
-
-The v0.2 Python API uses immutable options and typed results; the CLI examples
-above retain their existing command syntax. See the [Python API reference](api.md)
-and [v0.2 migration guide](migration-to-v0.2.md) before upgrading API callers.
+Analysis accepts standalone SSMD and canonical directory or ZIP bundles.
+Speech audit is read-only. Annotation and freeze publish a new destination and
+never modify a workspace in place. See [analysis and speech workflows](analysis-workflows.md)
+for cache freshness, language behavior, and output policy.
 
 ## Help
 
 ```bash
 ssmdconvert --help
-ssmdconvert convert --help
-ssmdconvert inspect --help
-ssmdconvert book --help
-ssmdconvert book inspect --help
-ssmdconvert book convert --help
-ssmdconvert book validate --help
-ssmdconvert book metadata --help
+ssmdconvert bundle --help
+ssmdconvert bundle convert --help
+ssmdconvert bundle validate --help
 ssmdconvert report --help
-ssmdconvert context --help
-ssmdconvert txt --help
 ssmdconvert speech --help
-ssmdconvert speech audit --help
-ssmdconvert speech annotate --help
-ssmdconvert speech freeze --help
 ```

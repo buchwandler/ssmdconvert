@@ -352,7 +352,7 @@ def analyze_ssmd_source(
         preparation = prepared_result
 
     issues = [*extracted.issues, *fallback_issues]
-    dirty_label = "document" if loaded.kind == "ssmdoc" else "chapters"
+    dirty_label = "document" if loaded.bundle_kind == "document" else "chapters"
     if loaded.workspace_status == "dirty":
         dirty_value = ", ".join(loaded.dirty_chapters)
         issues.append(

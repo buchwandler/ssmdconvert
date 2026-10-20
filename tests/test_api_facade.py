@@ -128,19 +128,35 @@ def test_public_api_is_explicit_and_does_not_retain_ambiguous_convert_alias() ->
     assert ssmdconvert.convert_document is convert_document
 
 
-def test_document_workspace_api_is_public() -> None:
-    names = (
-        "SsmdDocument",
-        "convert_document_artifact",
-        "DocumentWorkspace",
-        "WorkspaceDocumentStatus",
-        "DocumentBundleError",
-        "DocumentBundleValidationError",
+def test_kind_neutral_bundle_api_is_public_and_replaces_split_storage_exports() -> None:
+    neutral_names = (
+        "BundleConversionResult",
+        "BundleInspection",
+        "BundleWorkspace",
+        "LoadedBundle",
+        "BundleKind",
+        "convert_bundle",
+        "inspect_bundle_source",
+        "load_bundle",
+        "load_bundle_workspace",
+        "pack_bundle",
+        "refresh_bundle_workspace",
+        "validate_bundle",
+        "write_bundle",
+    )
+    assert set(neutral_names) <= set(ssmdconvert.__all__)
+    assert all(getattr(ssmdconvert, name) is not None for name in neutral_names)
+
+    removed_names = (
+        "write_book_bundle",
+        "load_book_bundle",
+        "load_book_workspace",
+        "refresh_book_workspace",
+        "validate_book_bundle",
         "write_document_bundle",
         "load_document_bundle",
         "load_document_workspace",
         "refresh_document_workspace",
         "validate_document_bundle",
     )
-    assert set(names) <= set(ssmdconvert.__all__)
-    assert all(getattr(ssmdconvert, name) is not None for name in names)
+    assert all(not hasattr(ssmdconvert, name) for name in removed_names)
