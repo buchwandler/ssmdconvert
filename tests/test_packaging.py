@@ -38,10 +38,10 @@ def test_ttsready_is_core_and_spokenform_is_not_a_direct_dependency() -> None:
     dependencies = data["project"]["dependencies"]
 
     assert "ssmd>=0.9.3,<0.10" in dependencies
-    assert "ttsready>=0.2.2,<0.3" in dependencies
+    assert "ttsready>=0.2.4,<0.3" in dependencies
     assert "epub2text>=0.2.8,<0.3" in dependencies
     assert "typer>=0.20,<1" in dependencies
-    assert "spokenform>=0.4.3,<0.5" not in dependencies
+    assert all("spokenform" not in dependency for dependency in dependencies)
     assert "tomli>=2; python_version < '3.11'" in dependencies
     extras = data["project"]["optional-dependencies"]
     assert "rich>=13,<15" in dependencies

@@ -13,7 +13,7 @@ python -m pip install ssmdconvert
 
 The base install supports plain text, Markdown, HTML, EPUB, and SSMD inputs,
 including SSMD-aware report/context/TXT and speech audit/annotate/freeze commands.
-EPUB extraction uses the local `epub2text` dependency. `ttsready>=0.2.2,<0.3` is a core
+EPUB extraction uses the local `epub2text` dependency. `ttsready>=0.2.4,<0.3` is a core
 dependency for source-neutral preparation and QA.
 
 The base CLI includes Rich for interactive terminal progress. spaCy is optional:

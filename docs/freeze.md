@@ -12,6 +12,18 @@ ssmdconvert speech freeze SOURCE -o frozen.ssmd --report freeze-report.json
 
 Fresh EPUB conversion applies this freeze automatically: `ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle`. Use `--speech-semantics preserve` to request the historical structural-only result. The conversion-time aliases come from `ttsready`/`spokenform`, do not alter visible source text, and do not override author-owned annotations. A resolvable language is required for freeze; use `--language` to set the base for unscoped text or use preserve when none is available. Inline SSMD language scopes remain authoritative.
 
+## Ownership boundary
+
+Spokenform recognizes linguistic forms and proposes spoken replacements. TTSReady provides
+preparation-set consistency and quality checks. SSMDConvert parses and maps those source-relative
+changes, then persists them in SSMD without rewriting visible text. SSMDConvert is not an acronym
+detector or punctuation normalizer.
+
+```markdown
+[open/close]{sub="open slash close"}
+[ART’s]{sub="A R T’s"}
+```
+
 `freeze` uses the same fail-closed mapping, validation, and atomic writer as
 [`speech annotate`](speech-annotations.md). It preserves visible text, does not
 duplicate authoritative SSMD substitutions, refuses unresolved effective

@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import ttsready
+import ttsready.preparation as ttsready_preparation
 
 from ssmdconvert.analysis.cache import AnalysisCache, analyze_with_cache
 from ssmdconvert.errors import AnalysisCacheError
@@ -81,6 +83,30 @@ def test_analysis_id_tracks_source_bytes_and_has_expected_sha256_shape(tmp_path:
     assert result.analysis_id.startswith("ana:v1:")
     assert snapshot["source"]["source_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
     assert snapshot["source"]["content_fingerprint"] == result.report.source.content_fingerprint
+
+
+def test_runtime_fingerprint_change_forces_a_cache_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime_id = {"value": "a" * 64}
+    monkeypatch.setattr(ttsready, "runtime_fingerprint", lambda: runtime_id["value"])
+    monkeypatch.setattr(ttsready_preparation, "runtime_fingerprint", lambda: runtime_id["value"])
+
+    source = _source(tmp_path / "runtime.ssmd")
+    cache = AnalysisCache(tmp_path / "cache")
+    first = analyze_with_cache(source, cache=cache, max_paragraph_chars=None)
+    repeated = analyze_with_cache(source, cache=cache, max_paragraph_chars=None)
+
+    assert first.chapter_cache_misses == 1
+    assert repeated.chapter_cache_hits == 1
+    assert first.analysis.preparation.runtime_fingerprint == "a" * 64
+
+    runtime_id["value"] = "b" * 64
+    changed_runtime = analyze_with_cache(source, cache=cache, max_paragraph_chars=None)
+
+    assert changed_runtime.chapter_cache_misses == 1
+    assert changed_runtime.analysis_id != first.analysis_id
+    assert changed_runtime.analysis.preparation.runtime_fingerprint == "b" * 64
 
 
 def test_linguistics_policy_and_model_versions_fingerprint_cache_without_hit_inference(

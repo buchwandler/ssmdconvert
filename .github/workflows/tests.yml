@@ -117,7 +117,7 @@ jobs:
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
       - name: Install declared runtime dependency floors
-        run: python -m pip install "ssmd==0.9.3" "ttsready==0.2.3" "epub2text==0.2.8" "typer==0.20.*"
+        run: python -m pip install "ssmd==0.9.3" "ttsready==0.2.4" "epub2text==0.2.8" "typer==0.20.*"
       - name: Install package and test dependencies
         run: python -m pip install -e ".[dev]"
       - name: Test core contracts at minimum dependency versions
@@ -132,6 +132,6 @@ jobs:
           tests/test_book_bundle.py
           tests/test_cli.py
       - name: Install speech dependency floor
-        run: python -m pip install "spokenform==0.4.5"
+        run: python -m pip install "spokenform==0.4.6"
       - name: Test core speech at its minimum dependency version
         run: python -m pytest tests/test_speech_preparation.py

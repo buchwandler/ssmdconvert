@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 from epub_support import make_epub
+from ssmd import parse_structure
 
+from ssmdconvert import Book
 from ssmdconvert.bundle import (
     convert_bundle,
     inspect_bundle_source,
@@ -29,6 +31,44 @@ def test_convert_document_source_uses_canonical_bundle_lifecycle(tmp_path: Path)
     assert validate_bundle(result.output) == "document"
     assert inspect_bundle_source(source).kind == "document"
     assert inspect_bundle_source(result.output).kind == "document"
+
+
+def test_public_book_conversion_bundle_contains_frozen_speech_aliases(tmp_path: Path) -> None:
+    source = tmp_path / "speech.epub"
+    make_epub(
+        source,
+        chapter_one_suffix=(
+            " Because someone (ART) approved it. ART’s module stayed open. "
+            "Later ART checked the open/close control and asked where/who. "
+            "target/destination head/processor torus/whatever we/somebody "
+            "where/who proximity/safety"
+        ),
+    )
+    output = tmp_path / "frozen.ssmd-bundle"
+
+    converted = convert_bundle(source, output=output, chapters="1")
+
+    assert converted.kind == "book"
+    assert converted.output == output
+    frozen = load_bundle(output)
+    assert frozen.kind == "book"
+    assert isinstance(frozen.value, Book)
+    chapter = frozen.value.chapters[0]
+    for alias in (
+        '[ART]{sub="A R T"}',
+        '[ART’s]{sub="A R T’s"}',
+        '[open/close]{sub="open slash close"}',
+        '[where/who]{sub="where slash who"}',
+        '[target/destination]{sub="target slash destination"}',
+        '[head/processor]{sub="head slash processor"}',
+        '[torus/whatever]{sub="torus slash whatever"}',
+        '[we/somebody]{sub="we slash somebody"}',
+        '[proximity/safety]{sub="proximity slash safety"}',
+    ):
+        assert alias in chapter.ssmd
+    clean_text = parse_structure(chapter.ssmd, dialect="0.9", normalize=False).clean_text
+    assert "Because someone (ART) approved it. ART’s module stayed open." in clean_text
+    assert "Later ART checked the open/close control and asked where/who." in clean_text
 
 
 def test_convert_standalone_ssmd_source_uses_stem_without_double_extension(
