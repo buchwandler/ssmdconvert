@@ -1,0 +1,36 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 257,
+      "deletions": 8,
+      "patch_file": "59890fd.patch",
+      "patch_sha256": "5c939db61fd55ac498a26a48d9753c92a334fdd573a2e3660d1954835178f035",
+      "paths": [
+        ".github/workflows/tests.yml",
+        ".ledger/releaseledger/data/ledgers/main/events/events.jsonl",
+        ".ledger/releaseledger/data/ledgers/main/releases/0.2.2/entries/entry-0002.md",
+        ".ledger/releaseledger/data/ledgers/main/releases/0.2.2/release.md",
+        "docs/changelog.md",
+        "docs/freeze.md",
+        "docs/installation.md",
+        "pyproject.toml",
+        "tests/test_analysis_cache.py",
+        "tests/test_bundle_conversion.py",
+        "tests/test_packaging.py",
+        "tests/test_speech_freeze_integration.py"
+      ],
+      "sha": "59890fd46254b6a1e3e4f1597d0d779c3b4d04d3",
+      "short_sha": "59890fd",
+      "source_ref": "git:59890fd46254b6a1e3e4f1597d0d779c3b4d04d3"
+    }
+  ],
+  "git_base_ref": "a50f2b6f9b148d86c701de70dc2a1269f284dda9",
+  "git_base_sha": "a50f2b6f9b148d86c701de70dc2a1269f284dda9",
+  "git_head_ref": "59890fd46254b6a1e3e4f1597d0d779c3b4d04d3",
+  "git_head_sha": "59890fd46254b6a1e3e4f1597d0d779c3b4d04d3",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.2.3",
+  "schema_version": 1
+}

@@ -1,0 +1,428 @@
+ .github/workflows/tests.yml                        |   4 +-
+ .../data/ledgers/main/events/events.jsonl          |   1 +
+ .../main/releases/0.2.2/entries/entry-0002.md      |  29 +++++
+ .../data/ledgers/main/releases/0.2.2/release.md    |   4 +-
+ docs/changelog.md                                  |   1 +
+ docs/freeze.md                                     |  12 ++
+ docs/installation.md                               |   2 +-
+ pyproject.toml                                     |   2 +-
+ tests/test_analysis_cache.py                       |  26 ++++
+ tests/test_bundle_conversion.py                    |  40 ++++++
+ tests/test_packaging.py                            |   4 +-
+ tests/test_speech_freeze_integration.py            | 140 +++++++++++++++++++++
+ 12 files changed, 257 insertions(+), 8 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index dbb7641..d9c13ce 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -117,7 +117,7 @@ jobs:
+       - name: Upgrade pip
+         run: python -m pip install --upgrade pip
+       - name: Install declared runtime dependency floors
+-        run: python -m pip install "ssmd==0.9.3" "ttsready==0.2.3" "epub2text==0.2.8" "typer==0.20.*"
++        run: python -m pip install "ssmd==0.9.3" "ttsready==0.2.4" "epub2text==0.2.8" "typer==0.20.*"
+       - name: Install package and test dependencies
+         run: python -m pip install -e ".[dev]"
+       - name: Test core contracts at minimum dependency versions
+@@ -132,6 +132,6 @@ jobs:
+           tests/test_book_bundle.py
+           tests/test_cli.py
+       - name: Install speech dependency floor
+-        run: python -m pip install "spokenform==0.4.5"
++        run: python -m pip install "spokenform==0.4.6"
+       - name: Test core speech at its minimum dependency version
+         run: python -m pytest tests/test_speech_preparation.py
+diff --git a/.ledger/releaseledger/data/ledgers/main/events/events.jsonl b/.ledger/releaseledger/data/ledgers/main/events/events.jsonl
+index 817ed76..eb29d92 100644
+--- a/.ledger/releaseledger/data/ledgers/main/events/events.jsonl
++++ b/.ledger/releaseledger/data/ledgers/main/events/events.jsonl
+@@ -61,3 +61,4 @@
+ {"data":{"released_at":"2026-10-19"},"event":"release.finalized","event_id":"event-0061","record_revisions":{"release:0.2.1":4},"release_version":"0.2.1","schema_version":2}
+ {"data":{"status":"planned"},"event":"release.created","event_id":"event-0062","record_revisions":{"release:0.2.2":1},"release_version":"0.2.2","schema_version":2}
+ {"data":{"kind":"changed","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0063","record_revisions":{"entry:0.2.2/entry-0001":1,"release:0.2.2":2},"release_version":"0.2.2","schema_version":2}
++{"data":{"kind":"changed","status":"accepted"},"entry_id":"entry-0002","event":"entry.added","event_id":"event-0064","record_revisions":{"entry:0.2.2/entry-0002":1,"release:0.2.2":3},"release_version":"0.2.2","schema_version":2}
+diff --git a/.ledger/releaseledger/data/ledgers/main/releases/0.2.2/entries/entry-0002.md b/.ledger/releaseledger/data/ledgers/main/releases/0.2.2/entries/entry-0002.md
+new file mode 100644
+index 0000000..37ca254
+--- /dev/null
++++ b/.ledger/releaseledger/data/ledgers/main/releases/0.2.2/entries/entry-0002.md
+@@ -0,0 +1,29 @@
++---
++schema_version: 2
++object_type: release_entry
++versioning:
++  schema_version: 1
++  revision: 1
++entry_id: entry-0002
++release_version: 0.2.2
++kind: changed
++summary:
++  Freeze now persists consistent acronym and lexical slash speech decisions
++  with TTSReady 0.2.4 or newer
++status: accepted
++audience: null
++scopes: []
++source_refs:
++  - tl:task-0017
++paths:
++  - pyproject.toml
++  - docs/freeze.md
++  - tests/test_speech_freeze_integration.py
++issues: []
++prs: []
++sources: []
++contributors: []
++breaking: false
++internal: false
++order: 2
++---
+diff --git a/.ledger/releaseledger/data/ledgers/main/releases/0.2.2/release.md b/.ledger/releaseledger/data/ledgers/main/releases/0.2.2/release.md
+index 497997a..c5bd8e7 100644
+--- a/.ledger/releaseledger/data/ledgers/main/releases/0.2.2/release.md
++++ b/.ledger/releaseledger/data/ledgers/main/releases/0.2.2/release.md
+@@ -3,7 +3,7 @@ schema_version: 2
+ object_type: release
+ versioning:
+   schema_version: 1
+-  revision: 2
++  revision: 3
+ version: 0.2.2
+ status: planned
+ history_state: curated
+@@ -16,7 +16,7 @@ changelog_file: docs/changelog.md
+ boundary_ref: null
+ source_refs: []
+ source_count: null
+-entry_count: 1
++entry_count: 2
+ artifact_count: 0
+ git_base_ref: null
+ git_base_sha: null
+diff --git a/docs/changelog.md b/docs/changelog.md
+index cc4d584..5dde4c7 100644
+--- a/docs/changelog.md
++++ b/docs/changelog.md
+@@ -7,6 +7,7 @@
+ ### Changed
+
+ - **BREAKING:** Unified book and document bundle operations under canonical artifact names
++- Freeze now persists consistent acronym and lexical slash speech decisions with TTSReady 0.2.4 or newer
+
+ <!-- generated by releaseledger -->
+
+diff --git a/docs/freeze.md b/docs/freeze.md
+index 8323dc5..15a7d22 100644
+--- a/docs/freeze.md
++++ b/docs/freeze.md
+@@ -12,6 +12,18 @@ ssmdconvert speech freeze SOURCE -o frozen.ssmd --report freeze-report.json
+
+ Fresh EPUB conversion applies this freeze automatically: `ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle`. Use `--speech-semantics preserve` to request the historical structural-only result. The conversion-time aliases come from `ttsready`/`spokenform`, do not alter visible source text, and do not override author-owned annotations. A resolvable language is required for freeze; use `--language` to set the base for unscoped text or use preserve when none is available. Inline SSMD language scopes remain authoritative.
+
++## Ownership boundary
++
++Spokenform recognizes linguistic forms and proposes spoken replacements. TTSReady provides
++preparation-set consistency and quality checks. SSMDConvert parses and maps those source-relative
++changes, then persists them in SSMD without rewriting visible text. SSMDConvert is not an acronym
++detector or punctuation normalizer.
++
++```markdown
++[open/close]{sub="open slash close"}
++[ART’s]{sub="A R T’s"}
++```
++
+ `freeze` uses the same fail-closed mapping, validation, and atomic writer as
+ [`speech annotate`](speech-annotations.md). It preserves visible text, does not
+ duplicate authoritative SSMD substitutions, refuses unresolved effective
+diff --git a/docs/installation.md b/docs/installation.md
+index 81881ae..79baedc 100644
+--- a/docs/installation.md
++++ b/docs/installation.md
+@@ -13,7 +13,7 @@ python -m pip install ssmdconvert
+
+ The base install supports plain text, Markdown, HTML, EPUB, and SSMD inputs,
+ including SSMD-aware report/context/TXT and speech audit/annotate/freeze commands.
+-EPUB extraction uses the local `epub2text` dependency. `ttsready>=0.2.2,<0.3` is a core
++EPUB extraction uses the local `epub2text` dependency. `ttsready>=0.2.4,<0.3` is a core
+ dependency for source-neutral preparation and QA.
+
+ The base CLI includes Rich for interactive terminal progress. spaCy is optional:
+diff --git a/pyproject.toml b/pyproject.toml
+index 414dd3f..cd57bf7 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -26,7 +26,7 @@ classifiers = [
+ ]
+ dependencies = [
+   "ssmd>=0.9.3,<0.10",
+-  "ttsready>=0.2.2,<0.3",
++  "ttsready>=0.2.4,<0.3",
+   "epub2text>=0.2.8,<0.3",
+   "markdown-it-py>=3.0,<5.0",
+   "mdit-py-plugins>=0.4,<1.0",
+diff --git a/tests/test_analysis_cache.py b/tests/test_analysis_cache.py
+index cc9eaac..e460dae 100644
+--- a/tests/test_analysis_cache.py
++++ b/tests/test_analysis_cache.py
+@@ -7,6 +7,8 @@ from pathlib import Path
+ from types import SimpleNamespace
+
+ import pytest
++import ttsready
++import ttsready.preparation as ttsready_preparation
+
+ from ssmdconvert.analysis.cache import AnalysisCache, analyze_with_cache
+ from ssmdconvert.errors import AnalysisCacheError
+@@ -83,6 +85,30 @@ def test_analysis_id_tracks_source_bytes_and_has_expected_sha256_shape(tmp_path:
+     assert snapshot["source"]["content_fingerprint"] == result.report.source.content_fingerprint
+
+
++def test_runtime_fingerprint_change_forces_a_cache_miss(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    runtime_id = {"value": "a" * 64}
++    monkeypatch.setattr(ttsready, "runtime_fingerprint", lambda: runtime_id["value"])
++    monkeypatch.setattr(ttsready_preparation, "runtime_fingerprint", lambda: runtime_id["value"])
++
++    source = _source(tmp_path / "runtime.ssmd")
++    cache = AnalysisCache(tmp_path / "cache")
++    first = analyze_with_cache(source, cache=cache, max_paragraph_chars=None)
++    repeated = analyze_with_cache(source, cache=cache, max_paragraph_chars=None)
++
++    assert first.chapter_cache_misses == 1
++    assert repeated.chapter_cache_hits == 1
++    assert first.analysis.preparation.runtime_fingerprint == "a" * 64
++
++    runtime_id["value"] = "b" * 64
++    changed_runtime = analyze_with_cache(source, cache=cache, max_paragraph_chars=None)
++
++    assert changed_runtime.chapter_cache_misses == 1
++    assert changed_runtime.analysis_id != first.analysis_id
++    assert changed_runtime.analysis.preparation.runtime_fingerprint == "b" * 64
++
++
+ def test_linguistics_policy_and_model_versions_fingerprint_cache_without_hit_inference(
+     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+diff --git a/tests/test_bundle_conversion.py b/tests/test_bundle_conversion.py
+index b034236..6ff2c9a 100644
+--- a/tests/test_bundle_conversion.py
++++ b/tests/test_bundle_conversion.py
+@@ -4,7 +4,9 @@ from pathlib import Path
+
+ import pytest
+ from epub_support import make_epub
++from ssmd import parse_structure
+
++from ssmdconvert import Book
+ from ssmdconvert.bundle import (
+     convert_bundle,
+     inspect_bundle_source,
+@@ -31,6 +33,44 @@ def test_convert_document_source_uses_canonical_bundle_lifecycle(tmp_path: Path)
+     assert inspect_bundle_source(result.output).kind == "document"
+
+
++def test_public_book_conversion_bundle_contains_frozen_speech_aliases(tmp_path: Path) -> None:
++    source = tmp_path / "speech.epub"
++    make_epub(
++        source,
++        chapter_one_suffix=(
++            " Because someone (ART) approved it. ART’s module stayed open. "
++            "Later ART checked the open/close control and asked where/who. "
++            "target/destination head/processor torus/whatever we/somebody "
++            "where/who proximity/safety"
++        ),
++    )
++    output = tmp_path / "frozen.ssmd-bundle"
++
++    converted = convert_bundle(source, output=output, chapters="1")
++
++    assert converted.kind == "book"
++    assert converted.output == output
++    frozen = load_bundle(output)
++    assert frozen.kind == "book"
++    assert isinstance(frozen.value, Book)
++    chapter = frozen.value.chapters[0]
++    for alias in (
++        '[ART]{sub="A R T"}',
++        '[ART’s]{sub="A R T’s"}',
++        '[open/close]{sub="open slash close"}',
++        '[where/who]{sub="where slash who"}',
++        '[target/destination]{sub="target slash destination"}',
++        '[head/processor]{sub="head slash processor"}',
++        '[torus/whatever]{sub="torus slash whatever"}',
++        '[we/somebody]{sub="we slash somebody"}',
++        '[proximity/safety]{sub="proximity slash safety"}',
++    ):
++        assert alias in chapter.ssmd
++    clean_text = parse_structure(chapter.ssmd, dialect="0.9", normalize=False).clean_text
++    assert "Because someone (ART) approved it. ART’s module stayed open." in clean_text
++    assert "Later ART checked the open/close control and asked where/who." in clean_text
++
++
+ def test_convert_standalone_ssmd_source_uses_stem_without_double_extension(
+     tmp_path: Path,
+ ) -> None:
+diff --git a/tests/test_packaging.py b/tests/test_packaging.py
+index 1d37420..a749b2c 100644
+--- a/tests/test_packaging.py
++++ b/tests/test_packaging.py
+@@ -38,10 +38,10 @@ def test_ttsready_is_core_and_spokenform_is_not_a_direct_dependency() -> None:
+     dependencies = data["project"]["dependencies"]
+
+     assert "ssmd>=0.9.3,<0.10" in dependencies
+-    assert "ttsready>=0.2.2,<0.3" in dependencies
++    assert "ttsready>=0.2.4,<0.3" in dependencies
+     assert "epub2text>=0.2.8,<0.3" in dependencies
+     assert "typer>=0.20,<1" in dependencies
+-    assert "spokenform>=0.4.3,<0.5" not in dependencies
++    assert all("spokenform" not in dependency for dependency in dependencies)
+     assert "tomli>=2; python_version < '3.11'" in dependencies
+     extras = data["project"]["optional-dependencies"]
+     assert "rich>=13,<15" in dependencies
+diff --git a/tests/test_speech_freeze_integration.py b/tests/test_speech_freeze_integration.py
+new file mode 100644
+index 0000000..f418c40
+--- /dev/null
++++ b/tests/test_speech_freeze_integration.py
+@@ -0,0 +1,140 @@
++from __future__ import annotations
++
++from collections import Counter
++from pathlib import Path
++
++from ssmd import parse_structure
++
++from ssmdconvert.analysis.prepare import analyze_ssmd_source
++from ssmdconvert.speech.mapping import map_analysis_changes
++from ssmdconvert.speech.workflows import materialize_analysis
++
++
++def _document(body: str) -> str:
++    return f'---\nssmd_version: "0.9"\nlanguage: en-US\n---\n{body}\n'
++
++
++def _write_source(tmp_path: Path, name: str, body: str) -> Path:
++    path = tmp_path / name
++    path.write_text(_document(body), encoding="utf-8")
++    return path
++
++
++def test_synthetic_speech_freeze_integrates_consistency_slashes_and_is_idempotent(
++    tmp_path: Path,
++) -> None:
++    body = (
++        "Because someone (ART) approved it. ART’s module stayed open.\n\n"
++        "Later ART checked the open/close control and asked where/who.\n\n"
++        "target/destination head/processor torus/whatever we/somebody "
++        "where/who proximity/safety"
++    )
++    source_path = _write_source(tmp_path, "synthetic.ssmd", body)
++    analysis = analyze_ssmd_source(source_path, include_titles=False)
++    changes = analysis.preparation.changes
++
++    seed = next(
++        change
++        for change in changes
++        if change.source == "ART" and change.provenance.get("origin") == "spokenform"
++    )
++    possessive = next(change for change in changes if change.source == "ART’s")
++    propagated_bare = next(
++        change
++        for change in changes
++        if change.source == "ART" and change.provenance.get("origin") == "ttsready.consistency"
++    )
++    assert seed.replacement == "A R T"
++    assert possessive.replacement == "A R T’s"
++    assert possessive.provenance["origin"] == "ttsready.consistency"
++    assert possessive.provenance["seed_change_id"] == seed.id
++    assert possessive.provenance["seed_rule"] == seed.rule
++    assert propagated_bare.replacement == "A R T"
++    assert propagated_bare.provenance["seed_change_id"] == seed.id
++
++    slash_speech = {
++        "open/close": "open slash close",
++        "where/who": "where slash who",
++        "target/destination": "target slash destination",
++        "head/processor": "head slash processor",
++        "torus/whatever": "torus slash whatever",
++        "we/somebody": "we slash somebody",
++        "proximity/safety": "proximity slash safety",
++    }
++    slash_changes = [change for change in changes if change.source in slash_speech]
++    assert Counter(change.source for change in slash_changes) == Counter(
++        {
++            "open/close": 1,
++            "where/who": 2,
++            "target/destination": 1,
++            "head/processor": 1,
++            "torus/whatever": 1,
++            "we/somebody": 1,
++            "proximity/safety": 1,
++        }
++    )
++    for change in slash_changes:
++        assert change.replacement == slash_speech[change.source]
++        assert change.provenance["origin"] == "spokenform"
++
++    mapped = map_analysis_changes(analysis)
++    assert mapped
++    assert all(item.mapping_status == "exact" for item in mapped)
++    assert all(item.materialization_status == "available" for item in mapped)
++    section = analysis.sections[0]
++    spans = []
++    for item in mapped:
++        assert item.raw_source_start is not None and item.raw_source_end is not None
++        assert section.ssmd[item.raw_source_start : item.raw_source_end] == item.change.source
++        spans.append((item.raw_source_start, item.raw_source_end))
++    ordered_spans = sorted(spans)
++    assert all(
++        left[1] <= right[0] for left, right in zip(ordered_spans, ordered_spans[1:], strict=False)
++    )
++
++    frozen_result = materialize_analysis(analysis)
++    frozen = frozen_result.section_ssmd[section.id]
++    assert frozen_result.summary.complete
++    assert frozen_result.summary.unresolved == 0
++    expected_alias_counts = {
++        '[ART]{sub="A R T"}': 2,
++        '[ART’s]{sub="A R T’s"}': 1,
++        '[open/close]{sub="open slash close"}': 1,
++        '[where/who]{sub="where slash who"}': 2,
++        '[target/destination]{sub="target slash destination"}': 1,
++        '[head/processor]{sub="head slash processor"}': 1,
++        '[torus/whatever]{sub="torus slash whatever"}': 1,
++        '[we/somebody]{sub="we slash somebody"}': 1,
++        '[proximity/safety]{sub="proximity slash safety"}': 1,
++    }
++    for alias, count in expected_alias_counts.items():
++        assert frozen.count(alias) == count
++    assert "[/]{sub=" not in frozen
++    assert '{sub="slash"}' not in frozen
++
++    before = parse_structure(section.ssmd, dialect="0.9", normalize=False)
++    after = parse_structure(frozen, dialect="0.9", normalize=False)
++    assert after.clean_text == before.clean_text
++
++    frozen_path = tmp_path / "already-frozen.ssmd"
++    frozen_path.write_text(frozen, encoding="utf-8")
++    second_analysis = analyze_ssmd_source(frozen_path, include_titles=False)
++    second_result = materialize_analysis(second_analysis)
++    assert second_result.section_ssmd[second_analysis.sections[0].id] == frozen
++    assert second_result.summary.complete
++
++
++def test_existing_art_sub_alias_remains_authoritative(tmp_path: Path) -> None:
++    source_path = _write_source(
++        tmp_path,
++        "author-alias.ssmd",
++        'Because [ART]{sub="A R T"} was already annotated.',
++    )
++    analysis = analyze_ssmd_source(source_path, include_titles=False)
++    mapped = map_analysis_changes(analysis)
++    author_alias = next(item for item in mapped if item.change.source == "ART")
++
++    assert author_alias.materialization_status == "already-authoritative"
++    result = materialize_analysis(analysis)
++    assert result.section_ssmd[analysis.sections[0].id] == analysis.sections[0].ssmd
++    assert result.section_ssmd[analysis.sections[0].id].count('[ART]{sub="A R T"}') == 1

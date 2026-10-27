@@ -1,0 +1,21 @@
+rows:
+  - sha: 59890fd46254b6a1e3e4f1597d0d779c3b4d04d3
+    inspected: true
+    inspected_paths:
+      - docs/freeze.md
+      - docs/installation.md
+      - pyproject.toml
+      - tests/test_analysis_cache.py
+      - tests/test_bundle_conversion.py
+      - tests/test_packaging.py
+      - tests/test_speech_freeze_integration.py
+    observed_behavior: >-
+      Updated the freeze workflow and dependency floors so TTSReady 0.2.4
+      consistency and slash-speech decisions are persisted in SSMD; added
+      integration and cache coverage for the behavior.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

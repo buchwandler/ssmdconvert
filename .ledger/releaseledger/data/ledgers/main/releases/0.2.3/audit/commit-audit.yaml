@@ -1,0 +1,52 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.2.3
+git_base_ref: v0.2.2
+git_base_sha: a50f2b6f9b148d86c701de70dc2a1269f284dda9
+git_head_ref: HEAD
+git_head_sha: 59890fd46254b6a1e3e4f1597d0d779c3b4d04d3
+git_range: a50f2b6f9b148d86c701de70dc2a1269f284dda9..59890fd46254b6a1e3e4f1597d0d779c3b4d04d3
+commit_count: 1
+rows:
+  - sha: 59890fd46254b6a1e3e4f1597d0d779c3b4d04d3
+    source_ref: git:59890fd46254b6a1e3e4f1597d0d779c3b4d04d3
+    short_sha: 59890fd
+    changed_paths:
+      - .github/workflows/tests.yml
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.2.2/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.2.2/release.md
+      - docs/changelog.md
+      - docs/freeze.md
+      - docs/installation.md
+      - pyproject.toml
+      - tests/test_analysis_cache.py
+      - tests/test_bundle_conversion.py
+      - tests/test_packaging.py
+      - tests/test_speech_freeze_integration.py
+    stats:
+      files_changed: 12
+      insertions: 257
+      deletions: 8
+    inspected: true
+    inspected_paths:
+      - docs/freeze.md
+      - docs/installation.md
+      - pyproject.toml
+      - tests/test_analysis_cache.py
+      - tests/test_bundle_conversion.py
+      - tests/test_packaging.py
+      - tests/test_speech_freeze_integration.py
+    observed_behavior:
+      Updated the freeze workflow and dependency floors so TTSReady
+      0.2.4 consistency and slash-speech decisions are persisted in SSMD; added integration
+      and cache coverage for the behavior.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: better consistency"
+    target_entry_id: entry-0001
+    notes: ""

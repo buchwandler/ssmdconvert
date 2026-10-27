@@ -3,12 +3,12 @@ schema_version: 2
 object_type: release
 versioning:
   schema_version: 1
-  revision: 3
+  revision: 5
 version: 0.2.2
-status: planned
+status: released
 history_state: curated
 title: SSMDConvert 0.2.2
-released_at: null
+released_at: "2026-10-20"
 previous_version: 0.2.1
 cancel_reason: null
 superseded_by: null
@@ -16,7 +16,7 @@ changelog_file: docs/changelog.md
 boundary_ref: null
 source_refs: []
 source_count: null
-entry_count: 2
+entry_count: 1
 artifact_count: 0
 git_base_ref: null
 git_base_sha: null
