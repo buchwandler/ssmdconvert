@@ -65,6 +65,82 @@ def test_speech_audit_json_is_read_only_and_uses_shared_change_ids(tmp_path: Pat
     assert payload["freeze_mapping"]["applied"] == 1
 
 
+def test_speech_profile_is_consistent_across_analysis_and_freeze_commands(tmp_path: Path) -> None:
+    source = tmp_path / "profile-source.ssmd"
+    profile = tmp_path / "speech.toml"
+    original = _document("ART met B-E. ART’s comm stayed open.")
+    source.write_text(original, encoding="utf-8")
+    profile.write_text(
+        """schema = "ssmdconvert-speech-profile"
+version = 1
+[replacements]
+"ART" = "art"
+"B-E" = "B E"
+""",
+        encoding="utf-8",
+    )
+
+    report = runner.invoke(
+        app, ["report", str(source), "--speech-profile", str(profile), "--format", "md"]
+    )
+    assert report.exit_code == 0, report.output
+    assert "Speech profile" in report.output
+    assert "explicit replacements: 2" in report.output
+
+    txt = runner.invoke(app, ["txt", str(source), "--speech-profile", str(profile)])
+    assert txt.exit_code == 0, txt.output
+    assert "art met B E. art’s comm stayed open." in txt.output
+
+    audit = runner.invoke(
+        app, ["speech", "audit", str(source), "--speech-profile", str(profile), "--json"]
+    )
+    assert audit.exit_code == 0, audit.output
+    changes = {item["source"]: item["replacement"] for item in json.loads(audit.output)["changes"]}
+    assert changes["ART"] == "art"
+    assert changes["B-E"] == "B E"
+    assert changes["ART’s"] == "art’s"
+
+    annotated = tmp_path / "annotated.ssmd"
+    annotation = runner.invoke(
+        app,
+        [
+            "speech",
+            "annotate",
+            str(source),
+            "-o",
+            str(annotated),
+            "--speech-profile",
+            str(profile),
+        ],
+    )
+    assert annotation.exit_code == 0, annotation.output
+    frozen = annotated.read_text(encoding="utf-8")
+    assert '[ART]{sub="art"}' in frozen
+    assert '[B-E]{sub="B E"}' in frozen
+    assert '[ART’s]{sub="art’s"}' in frozen
+    assert (
+        parse_structure(frozen, dialect="0.9").clean_text
+        == parse_structure(original, dialect="0.9").clean_text
+    )
+
+    freeze_output = tmp_path / "frozen.ssmd"
+    freeze = runner.invoke(
+        app,
+        [
+            "speech",
+            "freeze",
+            str(source),
+            "-o",
+            str(freeze_output),
+            "--speech-profile",
+            str(profile),
+        ],
+    )
+    assert freeze.exit_code == 0, freeze.output
+    assert freeze_output.read_text(encoding="utf-8") == frozen
+    assert source.read_text(encoding="utf-8") == original
+
+
 def test_speech_freeze_reports_json_and_human_summaries(tmp_path: Path) -> None:
     source = tmp_path / "freeze-source.ssmd"
     output = tmp_path / "frozen.ssmd"

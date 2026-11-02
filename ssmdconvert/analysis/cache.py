@@ -756,10 +756,13 @@ def analyze_with_cache(
         profile or ttsready.PreparationProfile(),
         sequence_fallback_mode=effective_fallback,
     )
+    profile_replacements = pronunciations or {}
+    profile_surfaces = set(profile_replacements)
+    caller_overrides = tuple(item for item in overrides if item.surface not in profile_surfaces)
     all_overrides = (
         *extracted.overrides,
-        *overrides,
-        *_pronunciation_overrides(pronunciations or {}),
+        *_pronunciation_overrides(profile_replacements, extracted.units),
+        *caller_overrides,
     )
     profile_hash = ttsready.profile_fingerprint(active_profile)
     runtime_hash = ttsready.runtime_fingerprint()

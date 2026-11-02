@@ -141,6 +141,44 @@ the source. An incomplete freeze raises `SpeechFreezeFailure` with partial
 evidence. See [analysis and speech workflows](analysis-workflows.md) for CLI
 usage, cache freshness, and safe publication.
 
+## Speech profiles and inventory
+
+`inventory_speech()` accepts raw EPUB, supported single-document sources, standalone SSMD, and canonical directory/ZIP bundles. It returns a deterministic in-memory result and does not publish a bundle or write temporary artifacts. Configure source selection, profile replacements, context bounds, and optional local spaCy hints with `SpeechInventoryOptions`.
+
+```python
+from ssmdconvert import (
+    SpeechInventoryOptions,
+    inventory_speech,
+    load_speech_profile,
+    effective_replacements,
+)
+
+profile = load_speech_profile("speech.toml")
+inventory = inventory_speech(
+    "novel.epub",
+    options=SpeechInventoryOptions(
+        chapters="1-3",
+        pronunciations=effective_replacements(profile),
+    ),
+)
+for candidate in inventory.candidates:
+    print(candidate.surface, candidate.count, candidate.profile_replacement)
+```
+
+`SpeechInventory`, `SpeechInventoryCandidate`, `SpeechInventoryOccurrence`, and `SpeechInventoryOptions` are exported from the package facade. See [Speech-risk inventory](speech-inventory.md) for output semantics and [Speech replacement profiles](speech-profiles.md) for strict TOML validation, possessive derivation, and precedence.
+
+```{autofunction} ssmdconvert.inventory_speech
+
+```
+
+```{autoclass} ssmdconvert.SpeechInventoryOptions
+:members:
+```
+
+```{autoclass} ssmdconvert.SpeechInventory
+:members:
+```
+
 ```{autofunction} ssmdconvert.analyze_ssmd
 
 ```

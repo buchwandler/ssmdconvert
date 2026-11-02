@@ -12,6 +12,8 @@ ssmdconvert speech freeze SOURCE -o frozen.ssmd --report freeze-report.json
 
 Fresh EPUB conversion applies this freeze automatically: `ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle`. Use `--speech-semantics preserve` to request the historical structural-only result. The conversion-time aliases come from `ttsready`/`spokenform`, do not alter visible source text, and do not override author-owned annotations. A resolvable language is required for freeze; use `--language` to set the base for unscoped text or use preserve when none is available. Inline SSMD language scopes remain authoritative.
 
+A reusable TOML vocabulary can be passed with `--speech-profile PATH` to `bundle convert`, `report`, `txt`, `speech audit`, `speech annotate`, and `speech freeze`. On fresh EPUB conversion it participates before automatic freezing. Existing authoritative `sub` annotations still win and are never rewritten. A profile passed with `--speech-semantics preserve` is validated but not materialized. See [Speech replacement profiles](speech-profiles.md) for the schema and precedence.
+
 ## Ownership boundary
 
 Spokenform recognizes linguistic forms and proposes spoken replacements. TTSReady provides

@@ -11,6 +11,12 @@ The bundle manifest determines whether the source contains a book or document.
 Book chapter selection uses original one-based source numbers; a single document
 has the section ID `document-0001`.
 
+## Speech profiles and inventory
+
+The optional `--speech-profile PATH` flag gives `bundle convert`, `report`, `txt`, speech audit/annotation/freeze, and inventory the same explicitly selected project vocabulary. Profiles are case-sensitive and whole-token; there is no current-directory auto-discovery. Existing SSMD `sub` annotations remain authoritative. See [Speech replacement profiles](speech-profiles.md).
+
+`ssmdconvert speech inventory SOURCE` scans raw EPUB in memory, supported documents, standalone SSMD, and directory/ZIP bundles. It reports orthographic risk signals, existing spoken forms, profile coverage/shadowing, and bounded contexts; it does not claim to identify non-English words. See [Speech-risk inventory](speech-inventory.md).
+
 ## Python API and cache boundary
 
 The root Python facade composes the same analysis, projection, report, and

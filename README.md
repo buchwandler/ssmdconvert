@@ -71,6 +71,19 @@ publishes a new destination and never mutates a workspace in place. The
 [analysis workflow guide](docs/analysis-workflows.md) describes cache freshness,
 language handling, progress, and safe publication.
 
+## Speech profiles and inventory
+
+Create an editable vocabulary inventory before freezing a book, then reuse one explicit profile across conversion and speech workflows:
+
+```bash
+ssmdconvert speech inventory novel.epub --format toml -o speech.toml
+# Review the template, then edit speech.toml.
+ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle --speech-profile speech.toml
+ssmdconvert speech audit novel.ssmd-bundle --speech-profile speech.toml
+```
+
+See [speech inventory](docs/speech-inventory.md) and [speech replacement profiles](docs/speech-profiles.md) for supported inputs, matching, precedence, and TOML details.
+
 ## Python API
 
 The `convert_bundle()` API dispatches supported sources and publishes a canonical
@@ -94,5 +107,7 @@ that need in-memory models or custom publication. See the [Python API reference]
 - [Installation](docs/installation.md)
 - [Bundle workspaces](docs/bundles.md)
 - [CLI usage](docs/usage.md)
+- [Speech-risk inventory](docs/speech-inventory.md)
+- [Speech replacement profiles](docs/speech-profiles.md)
 - [Analysis and speech workflows](docs/analysis-workflows.md)
 - [Python API](docs/api.md)

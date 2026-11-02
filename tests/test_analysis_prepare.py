@@ -141,9 +141,52 @@ def test_author_sub_and_project_pronunciations_use_ttsready_override_api(tmp_pat
     assert author_change.provenance["annotation"] == "sub"
     assert project_change.replacement == "N A S A"
     assert project_change.provenance["origin"] == "ssmdconvert"
-    assert project_change.provenance["source"] == "pronunciation-profile"
+    assert project_change.provenance["source"] == "speech-profile"
     assert all(change.id.startswith("chg:v1:") for change in changes)
     assert all(unit.unit_id.startswith("unit:v1:") for unit in analysis.preparation.units)
+
+
+def test_profile_replacements_materialize_and_keep_visible_text_unchanged(tmp_path: Path) -> None:
+    from ssmdconvert.speech.profile import effective_replacements, parse_speech_profile
+
+    visible = "ART met B-E. ART’s comm stayed open."
+    path = _write_source(tmp_path, visible)
+    profile = parse_speech_profile(
+        """schema = "ssmdconvert-speech-profile"
+version = 1
+[replacements]
+"ART" = "art"
+"B-E" = "B E"
+"""
+    )
+    analysis = analyze_ssmd_source(path, pronunciations=effective_replacements(profile))
+    frozen = materialize_analysis(analysis)
+    section_id = analysis.sections[0].id
+
+    assert analysis.structures[section_id].clean_text == visible
+    assert '[ART]{sub="art"}' in frozen.section_ssmd[section_id]
+    assert '[B-E]{sub="B E"}' in frozen.section_ssmd[section_id]
+    assert '[ART’s]{sub="art’s"}' in frozen.section_ssmd[section_id]
+    assert "A R T" not in frozen.section_ssmd[section_id]
+
+
+def test_existing_sub_and_profile_precedence_over_caller_override(tmp_path: Path) -> None:
+    path = _write_source(tmp_path, '[ART]{sub="A R T"}; NASA.')
+    caller = ttsready.SpeechOverride(surface="NASA", spoken="caller form", match="word")
+
+    analysis = analyze_ssmd_source(
+        path,
+        pronunciations={"ART": "art", "NASA": "N A S A"},
+        overrides=(caller,),
+    )
+    changes = {change.source: change for change in analysis.preparation.changes}
+    frozen = materialize_analysis(analysis)
+
+    assert changes["ART"].replacement == "A R T"
+    assert changes["ART"].provenance["origin"] == "ssmd"
+    assert changes["NASA"].replacement == "N A S A"
+    assert '[ART]{sub="A R T"}' in frozen.section_ssmd[analysis.sections[0].id]
+    assert '[NASA]{sub="N A S A"}' in frozen.section_ssmd[analysis.sections[0].id]
 
 
 def test_sequence_fallback_policy_is_forwarded_to_public_ttsready(

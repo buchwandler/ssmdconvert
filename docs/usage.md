@@ -79,6 +79,22 @@ Speech audit is read-only. Annotation and freeze publish a new destination and
 never modify a workspace in place. See [analysis and speech workflows](analysis-workflows.md)
 for cache freshness, language behavior, and output policy.
 
+## Speech profiles and inventory
+
+Use `ssmdconvert speech inventory SOURCE` to find likely speech-risk surfaces in an EPUB, supported document, standalone SSMD file, or canonical bundle. The default output is a table; `--format json` emits a versioned result and `--format toml` creates an editable profile template. A profile is selected explicitly with `--speech-profile PATH` and is never discovered from the current directory.
+
+```bash
+ssmdconvert speech inventory novel.epub --format toml -o speech.toml
+ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle --speech-profile speech.toml
+ssmdconvert report novel.ssmd-bundle --speech-profile speech.toml
+ssmdconvert txt novel.ssmd-bundle --speech-profile speech.toml -o prepared.txt
+ssmdconvert speech audit novel.ssmd-bundle --speech-profile speech.toml --json
+ssmdconvert speech annotate novel.ssmd-bundle --speech-profile speech.toml -o annotated.ssmd-bundle
+ssmdconvert speech freeze novel.ssmd-bundle --speech-profile speech.toml -o frozen.ssmd-bundle
+```
+
+Profiles preserve visible source text and materialize spoken forms through SSMD `sub` annotations. Existing authoritative `sub` values win; inventory/audit can show when a profile entry is shadowed. In preserve mode, conversion validates a selected profile but does not materialize it. See [speech replacement profiles](speech-profiles.md) and [speech-risk inventory](speech-inventory.md) for details and all options.
+
 ## Help
 
 ```bash

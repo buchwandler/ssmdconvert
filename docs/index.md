@@ -39,6 +39,8 @@ report
 context
 txt
 speech-audit
+speech-profiles
+speech-inventory
 speech-annotations
 freeze
 analysis-cache

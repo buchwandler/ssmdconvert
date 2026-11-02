@@ -30,7 +30,8 @@ Common options:
 - `--fail-on-warning`: emit the report and return a failing exit status if it
   contains a warning or error.
 
-JSON is versioned and owned by `ssmdconvert`. The report records generic change
-IDs, source mapping status, selected-section statistics, and the exact TXT
-projection hash. See [Analysis cache](analysis-cache.md) and
-[SSMD analysis workflows](analysis-workflows.md).
+- `--speech-profile PATH`: apply a reusable, explicitly selected speech vocabulary to preparation. Existing `sub` annotations remain authoritative; see [Speech replacement profiles](speech-profiles.md).
+  JSON is versioned and owned by `ssmdconvert`. The report records generic change
+  IDs, source mapping status, selected-section statistics, and the exact TXT
+  projection hash. See [Analysis cache](analysis-cache.md) and
+  [SSMD analysis workflows](analysis-workflows.md).

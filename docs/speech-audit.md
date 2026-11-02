@@ -16,5 +16,6 @@ selection, fallback mode, and title inclusion control the analysis as in `report
 
 Human output and JSON include the same mapping counts: applied, already authoritative, author-owned, and unresolved. `--json` emits `ssmdconvert.speech-audit.v2`, including each change's final disposition and a `freeze_mapping` summary. The audit is read-only; an `applied` disposition means the exact mapping is safe to write, not that the audit changed the source.
 
+Pass `--speech-profile PATH` to audit the same project-specific replacements used by conversion, report, TXT, annotation, and freeze. Existing authoritative `sub` annotations remain authoritative; an inventory/audit review can reveal a profile rule shadowed by an existing substitution. See [Speech replacement profiles](speech-profiles.md).
 Audit is read-only. To materialize eligible changes into SSMD, use
 [`speech annotate`](speech-annotations.md) or [`speech freeze`](freeze.md).

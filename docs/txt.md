@@ -16,6 +16,8 @@ requires `--force`, and the input cannot be used as the output. `--chapters`,
 options have the same meaning as in `report`. TXT is a projection only: it does
 not contain SSMD source annotations and does not write back to the source.
 
+Use `--speech-profile PATH` to project the same explicit project vocabulary used by conversion and speech audit. The option does not change visible text or materialize annotations; see [Speech replacement profiles](speech-profiles.md).
+
 ## Python API
 
 ```python

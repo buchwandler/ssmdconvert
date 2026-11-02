@@ -49,6 +49,7 @@ def convert_book_pipeline(
         language=options.language,
         sequence_fallback_mode=options.sequence_fallback_mode,
         linguistics=LinguisticsConfig(spacy=options.speech.spacy),
+        pronunciations=options.speech.pronunciations,
         on_progress=on_progress,
     )
     report = build_speech_freeze_report(

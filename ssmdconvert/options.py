@@ -56,6 +56,21 @@ def _freeze_metadata(value: Mapping[str, Any], name: str) -> Mapping[str, Any]:
     return frozen
 
 
+def _freeze_pronunciations(
+    value: Mapping[str, str], name: str = "pronunciations"
+) -> Mapping[str, str]:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{name} must be a mapping of words to spoken forms")
+    normalized: dict[str, str] = {}
+    for surface, spoken in value.items():
+        if not isinstance(surface, str) or not surface.strip() or surface != surface.strip():
+            raise ValueError(f"{name} keys must be non-empty strings without edge whitespace")
+        if not isinstance(spoken, str) or not spoken.strip():
+            raise ValueError(f"{name} values must be non-empty strings")
+        normalized[surface] = spoken
+    return MappingProxyType(normalized)
+
+
 def _optional_text(value: str | None, name: str, *, non_empty: bool = False) -> None:
     if value is not None and (not isinstance(value, str) or (non_empty and not value.strip())):
         qualifier = "non-empty " if non_empty else ""
@@ -78,11 +93,13 @@ class SpeechOptions:
 
     mode: SpeechMode = "freeze"
     spacy: SpacyPolicy = "off"
+    pronunciations: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.mode not in {"freeze", "preserve"}:
             raise ValueError("speech mode must be 'freeze' or 'preserve'")
         _spacy_policy(self.spacy)
+        object.__setattr__(self, "pronunciations", _freeze_pronunciations(self.pronunciations))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -167,18 +184,7 @@ class AnalysisOptions:
 
             if not isinstance(self.profile, PreparationProfile):
                 raise TypeError("profile must be a ttsready PreparationProfile or None")
-        if not isinstance(self.pronunciations, Mapping):
-            raise TypeError("pronunciations must be a mapping of words to spoken forms")
-        normalized: dict[str, str] = {}
-        for surface, spoken in self.pronunciations.items():
-            if not isinstance(surface, str) or not surface.strip() or surface != surface.strip():
-                raise ValueError(
-                    "pronunciation keys must be non-empty strings without edge whitespace"
-                )
-            if not isinstance(spoken, str) or not spoken.strip():
-                raise ValueError("pronunciation values must be non-empty strings")
-            normalized[surface] = spoken
-        object.__setattr__(self, "pronunciations", MappingProxyType(normalized))
+        object.__setattr__(self, "pronunciations", _freeze_pronunciations(self.pronunciations))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -37,12 +37,15 @@ def convert_bundle(
     sequence_fallback_mode: SequenceFallbackMode | None = None,
     speech_semantics: Literal["freeze", "preserve"] = "freeze",
     spacy: SpacyPolicy = "off",
+    pronunciations: Mapping[str, str] | None = None,
     force: bool = False,
     on_progress: ProgressCallback | None = None,
 ) -> BundleConversionResult:
     """Convert an EPUB or supported document through one bundle lifecycle."""
     source_path = Path(source).expanduser().resolve(strict=True)
     kind = detect_source_kind(source_path)
+    if kind != "book" and pronunciations is not None:
+        raise ValueError("speech profiles are currently supported only for EPUB book conversion")
     destination = (
         default_bundle_workspace_path(source_path) if output is None else Path(output).expanduser()
     )
@@ -57,7 +60,11 @@ def convert_bundle(
             language=language,
             metadata_overrides={} if metadata_overrides is None else metadata_overrides,
             sequence_fallback_mode=sequence_fallback_mode or DEFAULT_SEQUENCE_FALLBACK_MODE,
-            speech=SpeechOptions(mode=speech_semantics, spacy=spacy),
+            speech=SpeechOptions(
+                mode=speech_semantics,
+                spacy=spacy,
+                pronunciations={} if pronunciations is None else pronunciations,
+            ),
         )
         from .book_conversion import convert_book_pipeline
 

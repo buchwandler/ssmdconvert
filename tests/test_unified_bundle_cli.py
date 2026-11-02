@@ -7,9 +7,89 @@ import pytest
 from epub_support import make_epub
 from typer.testing import CliRunner
 
+from ssmdconvert._book_bundle import load_book_bundle
 from ssmdconvert.cli import app
 
 runner = CliRunner()
+
+
+def test_bundle_convert_uses_profile_for_every_chapter_and_preserve_mode(tmp_path: Path) -> None:
+    source = tmp_path / "profile.epub"
+    profile = tmp_path / "speech.toml"
+    make_epub(
+        source,
+        chapter_one_suffix=" ART B-E ART’s.",
+        chapter_two_suffix=" B-E ART.",
+    )
+    profile.write_text(
+        """schema = "ssmdconvert-speech-profile"
+version = 1
+[replacements]
+"ART" = "art"
+"B-E" = "B E"
+""",
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "frozen.ssmd-bundle"
+    frozen = runner.invoke(
+        app,
+        [
+            "bundle",
+            "convert",
+            str(source),
+            "-o",
+            str(output),
+            "--speech-profile",
+            str(profile),
+        ],
+    )
+    assert frozen.exit_code == 0, frozen.output
+    book = load_book_bundle(output)
+    assert len(book.chapters) == 2
+    for chapter in book.chapters:
+        assert '[ART]{sub="art"}' in chapter.ssmd
+        assert '[B-E]{sub="B E"}' in chapter.ssmd
+    assert '[ART’s]{sub="art’s"}' in book.chapters[0].ssmd
+
+    preserved_output = tmp_path / "preserved.ssmd-bundle"
+    preserved = runner.invoke(
+        app,
+        [
+            "bundle",
+            "convert",
+            str(source),
+            "-o",
+            str(preserved_output),
+            "--speech-profile",
+            str(profile),
+            "--speech-semantics",
+            "preserve",
+        ],
+    )
+    assert preserved.exit_code == 0, preserved.output
+    assert "Speech profile: loaded, not materialized because speech semantics are preserved." in (
+        preserved.output
+    )
+    preserved_book = load_book_bundle(preserved_output)
+    assert all('{sub="art"}' not in chapter.ssmd for chapter in preserved_book.chapters)
+
+    document = tmp_path / "profile.md"
+    document.write_text("# Document\n\nART B-E.\n", encoding="utf-8")
+    rejected = runner.invoke(
+        app,
+        [
+            "bundle",
+            "convert",
+            str(document),
+            "-o",
+            str(tmp_path / "document.ssmd-bundle"),
+            "--speech-profile",
+            str(profile),
+        ],
+    )
+    assert rejected.exit_code != 0
+    assert "only for EPUB book conversion" in rejected.output
 
 
 @pytest.mark.parametrize("kind", ["book", "document"])

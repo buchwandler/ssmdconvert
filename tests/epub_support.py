@@ -13,6 +13,7 @@ def make_epub(
     duplicate_visible_titles: bool = False,
     include_empty_spine_item: bool = False,
     chapter_one_suffix: str = "",
+    chapter_two_suffix: str = "",
     language: str | None = "en",
     chapter_language: str | None = "en",
 ) -> None:
@@ -38,7 +39,9 @@ def make_epub(
         file_name="c2.xhtml",
         lang=chapter_language,
     )
-    chapter_two.content = "<html><body><h1>Two</h1><p>World.</p></body></html>"
+    chapter_two.content = (
+        "<html><body><h1>Two</h1><p>World." + chapter_two_suffix + "</p></body></html>"
+    )
     book.add_item(chapter_one)
     book.add_item(chapter_two)
     spine = [chapter_one, chapter_two]

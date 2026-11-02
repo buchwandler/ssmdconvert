@@ -34,6 +34,9 @@ from .api import (
 from .api import (
     freeze_speech as freeze_speech_api,
 )
+from .api import (
+    inventory_speech as inventory_speech_api,
+)
 from .bundle import (
     convert_bundle,
     inspect_bundle_source,
@@ -61,6 +64,13 @@ from .policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SpeechSemanticsMode
 from .progress import ProgressCallback, ProgressEvent
 from .results import BookConversionResult
 from .speech.failures import SpeechFreezeFailure
+from .speech.inventory import SpeechInventoryOptions
+from .speech.profile import (
+    SpeechReplacementProfile,
+    effective_replacements,
+    load_speech_profile,
+    speech_profile_fingerprint,
+)
 from .speech.provenance import build_speech_provenance
 from .speech.workflows import summarize_changes
 
@@ -321,6 +331,27 @@ def _same_path(left: Path, right: Path) -> bool:
     return left.exists() and right.exists() and os.path.samefile(left, right)
 
 
+def _load_speech_replacements(speech_profile: Path | None) -> Mapping[str, str] | None:
+    if speech_profile is None:
+        return None
+
+    return effective_replacements(load_speech_profile(speech_profile))
+
+
+def _speech_profile_details(speech_profile: Path | None) -> dict[str, Any] | None:
+    if speech_profile is None:
+        return None
+    profile = load_speech_profile(speech_profile)
+    return {
+        "source": speech_profile.name,
+        "schema": profile.schema,
+        "version": profile.version,
+        "explicit_replacements": len(profile.replacements),
+        "effective_replacements": len(effective_replacements(profile)),
+        "fingerprint": speech_profile_fingerprint(profile),
+    }
+
+
 def _canonical_ssmd_bytes(value: bytes) -> bytes:
     """Compare SSMD snapshots independently of platform newline translation."""
     return value.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
@@ -481,6 +512,7 @@ def _speech_materialize_to_destination(
     sequence_fallback_mode: SequenceFallbackModeOption,
     force: bool,
     spacy: SpacyPolicy,
+    pronunciations: Mapping[str, str] | None,
     on_progress: ProgressCallback,
     report_output: Path | None = None,
     json_output: bool = False,
@@ -500,6 +532,7 @@ def _speech_materialize_to_destination(
             language=language,
             sequence_fallback_mode=sequence_fallback_mode.value,
             spacy=spacy,
+            pronunciations={} if pronunciations is None else pronunciations,
         ),
         on_progress=on_progress,
     )
@@ -690,6 +723,126 @@ def _render_speech_audit(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _speech_inventory_payload(
+    inventory: Any, profile: SpeechReplacementProfile | None = None
+) -> dict[str, Any]:
+    profile_data = None
+    if profile is not None:
+        profile_data = {
+            "schema": profile.schema,
+            "version": profile.version,
+            "explicit_replacements": len(profile.replacements),
+            "effective_replacements": len(effective_replacements(profile)),
+            "fingerprint": speech_profile_fingerprint(profile),
+        }
+    return {
+        "schema": inventory.schema,
+        "version": inventory.version,
+        "source": inventory.source,
+        "chapters": list(inventory.chapters),
+        "candidate_count": len(inventory.candidates),
+        "speech_profile": profile_data,
+        "candidates": [asdict(candidate) for candidate in inventory.candidates],
+    }
+
+
+def _render_speech_inventory_table(
+    inventory: Any, profile: SpeechReplacementProfile | None = None
+) -> str:
+    headings = ("Surface", "Count", "Signals", "Current speech", "Profile")
+    rows: list[tuple[str, ...]] = []
+    for candidate in inventory.candidates:
+        profile_display = candidate.profile_replacement or "-"
+        if candidate.profile_shadowed:
+            profile_display += " (shadowed)"
+        rows.append(
+            (
+                candidate.surface,
+                str(candidate.count),
+                ", ".join(candidate.reasons) or "-",
+                " / ".join(candidate.existing_spoken_forms) or "-",
+                profile_display,
+            )
+        )
+    widths = [
+        max(
+            len(headings[index]),
+            *(len(row[index]) for row in rows),
+        )
+        if rows
+        else len(headings[index])
+        for index in range(len(headings))
+    ]
+    lines = [
+        f"Speech inventory: {inventory.source}",
+        f"Chapters: {', '.join(inventory.chapters)}",
+        f"Candidates: {len(inventory.candidates)}",
+        "",
+        "  ".join(headings[index].ljust(widths[index]) for index in range(len(headings))),
+        "  ".join("-" * width for width in widths),
+    ]
+    if profile is not None:
+        profile_summary = (
+            f"Speech profile: {speech_profile_fingerprint(profile)} "
+            f"({len(profile.replacements)} explicit, "
+            f"{len(effective_replacements(profile))} effective replacements)"
+        )
+        lines.insert(3, profile_summary)
+    for candidate, row in zip(inventory.candidates, rows, strict=True):
+        lines.append("  ".join(row[index].ljust(widths[index]) for index in range(len(row))))
+        for occurrence in candidate.occurrences:
+            paragraph = (
+                "title" if occurrence.paragraph_index is None else str(occurrence.paragraph_index)
+            )
+            context = " ".join(occurrence.context.split())
+            location = f"{occurrence.section_id} / {paragraph}"
+            linguistic = f" [{occurrence.pos}]" if occurrence.pos else ""
+            lines.append(f"    {location}{linguistic}: {context}")
+    if not inventory.candidates:
+        lines.append("No speech-risk candidates found.")
+    return "\n".join(lines) + "\n"
+
+
+def _render_speech_inventory_toml(inventory: Any, profile: SpeechReplacementProfile | None) -> str:
+    explicit = {} if profile is None else dict(profile.replacements)
+    derive_possessives = True if profile is None else profile.derive_possessives
+    lines = [
+        'schema = "ssmdconvert-speech-profile"',
+        "version = 1",
+        f"derive_possessives = {'true' if derive_possessives else 'false'}",
+        "",
+        "[replacements]",
+        "",
+    ]
+    if profile is not None:
+        lines.insert(
+            3,
+            f"# Profile fingerprint: {speech_profile_fingerprint(profile)}",
+        )
+    candidates = {candidate.surface: candidate for candidate in inventory.candidates}
+    for surface, spoken in sorted(explicit.items()):
+        candidate = candidates.get(surface)
+        if candidate is not None:
+            lines.append(
+                f"# Existing entry; {candidate.count} occurrence(s), "
+                f"signals: {', '.join(candidate.reasons) or 'none'}."
+            )
+        lines.append(
+            f"{json.dumps(surface, ensure_ascii=False)} = {json.dumps(spoken, ensure_ascii=False)}"
+        )
+    for candidate in inventory.candidates:
+        if candidate.surface in explicit or candidate.profile_replacement is not None:
+            continue
+        lines.append(
+            f"# {candidate.count} occurrence(s); signals: {', '.join(candidate.reasons) or 'none'}."
+        )
+        if candidate.existing_spoken_forms:
+            spoken = "; ".join(" ".join(form.split()) for form in candidate.existing_spoken_forms)
+            lines.append(f"# Existing SSMD sub value(s): {spoken}")
+        lines.append(f'# {json.dumps(candidate.surface, ensure_ascii=False)} = ""')
+    return "\n".join(lines) + "\n"
+
+
 @app.command()  # type: ignore[untyped-decorator]
 def convert(
     source: Annotated[Path, typer.Argument(exists=True, dir_okay=False, readable=True)],
@@ -778,6 +931,7 @@ def _analyze_projection(
     max_paragraph_chars: int,
     include_titles: bool,
     spacy: SpacyPolicy,
+    pronunciations: Mapping[str, str] | None,
     on_progress: ProgressCallback,
 ) -> tuple[SsmdAnalysis, ProjectedText]:
     if max_paragraph_chars < 1:
@@ -790,6 +944,7 @@ def _analyze_projection(
             sequence_fallback_mode=sequence_fallback_mode.value,
             include_titles=include_titles,
             spacy=spacy,
+            pronunciations={} if pronunciations is None else pronunciations,
         ),
         on_progress=on_progress,
     )
@@ -843,12 +998,16 @@ def report(
         SpacyPolicy,
         typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
     ] = "off",
+    speech_profile: Annotated[Path | None, typer.Option("--speech-profile")] = None,
     progress: Annotated[
         bool | None,
         typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
     ] = None,
 ) -> None:
     """Report SSMD-aware preparation, source context, and TXT projection statistics."""
+
+    speech_replacements = _load_speech_replacements(speech_profile)
+    profile_details = _speech_profile_details(speech_profile)
 
     def run(on_progress: ProgressCallback) -> None:
         cached = analyze_cached_api(
@@ -859,6 +1018,7 @@ def report(
                 sequence_fallback_mode=sequence_fallback_mode.value,
                 include_titles=include_titles,
                 spacy=spacy,
+                pronunciations={} if speech_replacements is None else speech_replacements,
             ),
             projection_options=TextProjectionOptions(
                 max_paragraph_chars=max_paragraph_chars,
@@ -874,6 +1034,20 @@ def report(
             if selected_format == "json"
             else render_markdown_report(analysis_report, show_raw_spans=show_raw_spans)
         )
+        if profile_details is not None:
+            if selected_format == "json":
+                payload = json.loads(rendered)
+                payload["speech_profile"] = profile_details
+                rendered = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+            else:
+                rendered += "\n## Speech profile\n\n"
+                rendered += (
+                    "\n".join(
+                        f"- {key.replace('_', ' ')}: {value}"
+                        for key, value in profile_details.items()
+                    )
+                    + "\n"
+                )
         if output is None:
             typer.echo(rendered, nl=False)
         else:
@@ -932,12 +1106,14 @@ def txt(
         SpacyPolicy,
         typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
     ] = "off",
+    speech_profile: Annotated[Path | None, typer.Option("--speech-profile")] = None,
     progress: Annotated[
         bool | None,
         typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
     ] = None,
 ) -> None:
     """Project SSMD into generic prepared plain text for downstream TTS."""
+    speech_replacements = _load_speech_replacements(speech_profile)
 
     def run(on_progress: ProgressCallback) -> None:
         _analysis, projection = _analyze_projection(
@@ -948,6 +1124,7 @@ def txt(
             max_paragraph_chars=max_paragraph_chars,
             include_titles=include_titles,
             spacy=spacy,
+            pronunciations={} if speech_replacements is None else speech_replacements,
             on_progress=on_progress,
         )
         if output is None:
@@ -978,12 +1155,15 @@ def speech_audit(
         SpacyPolicy,
         typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
     ] = "off",
+    speech_profile: Annotated[Path | None, typer.Option("--speech-profile")] = None,
     progress: Annotated[
         bool | None,
         typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
     ] = None,
 ) -> None:
     """Audit SSMD speech changes, per-change dispositions, and mapping summary counts."""
+
+    speech_replacements = _load_speech_replacements(speech_profile)
 
     def run(on_progress: ProgressCallback) -> None:
         analysis = analyze_ssmd_api(
@@ -994,6 +1174,7 @@ def speech_audit(
                 sequence_fallback_mode=sequence_fallback_mode.value,
                 include_titles=include_titles,
                 spacy=spacy,
+                pronunciations={} if speech_replacements is None else speech_replacements,
             ),
             on_progress=on_progress,
         )
@@ -1011,6 +1192,73 @@ def speech_audit(
     _run_with_cli_progress(progress, run, "speech audit complete")
 
 
+@speech_app.command("inventory")  # type: ignore[untyped-decorator]
+def speech_inventory(
+    source: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    chapters: Annotated[str, typer.Option("--chapters", "-c")] = "all",
+    language: Annotated[str | None, typer.Option("--language", "-l")] = None,
+    speech_profile: Annotated[Path | None, typer.Option("--speech-profile")] = None,
+    output_format: Annotated[Literal["table", "json", "toml"], typer.Option("--format")] = "table",
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    force: Annotated[bool, typer.Option("--force")] = False,
+    include_existing: Annotated[
+        bool, typer.Option("--include-existing/--no-include-existing")
+    ] = True,
+    max_contexts: Annotated[int, typer.Option("--max-contexts", min=0)] = 2,
+    spacy: Annotated[
+        SpacyPolicy,
+        typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
+    ] = "off",
+) -> None:
+    """Inventory likely speech-risk surfaces without changing the source."""
+    try:
+        profile = load_speech_profile(speech_profile) if speech_profile is not None else None
+        replacements = None if profile is None else effective_replacements(profile)
+        inventory = inventory_speech_api(
+            source,
+            options=SpeechInventoryOptions(
+                chapters=chapters,
+                language=language,
+                pronunciations={} if replacements is None else replacements,
+                include_existing=include_existing,
+                max_contexts=max_contexts,
+                spacy=spacy,
+            ),
+        )
+        if output_format == "json":
+            rendered = (
+                json.dumps(
+                    _speech_inventory_payload(inventory, profile),
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+                + "\n"
+            )
+        elif output_format == "toml":
+            rendered = _render_speech_inventory_toml(inventory, profile)
+        else:
+            rendered = _render_speech_inventory_table(inventory, profile)
+        if output is None:
+            typer.echo(rendered, nl=False)
+        else:
+            if source.is_dir():
+                workspace_root = source.resolve(strict=True)
+                destination_path = _output_path(output).resolve(strict=False)
+                try:
+                    destination_path.relative_to(workspace_root)
+                except ValueError:
+                    pass
+                else:
+                    raise ValueError("inventory output must be outside the source bundle workspace")
+            _write_text_atomically(rendered, output, source=source, force=force)
+            typer.echo(f"Wrote speech inventory: {_output_path(output)}", err=True)
+    except (SSMDConvertError, OSError, ValueError, TypeError) as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
 def _run_speech_materialization_command(
     command: str,
     source: Path,
@@ -1021,10 +1269,13 @@ def _run_speech_materialization_command(
     sequence_fallback_mode: SequenceFallbackModeOption,
     force: bool,
     spacy: SpacyPolicy,
+    speech_profile: Path | None,
     progress: bool | None,
     report_output: Path | None = None,
     json_output: bool = False,
 ) -> None:
+    speech_replacements = _load_speech_replacements(speech_profile)
+
     def run(on_progress: ProgressCallback) -> None:
         destination, report = _speech_materialize_to_destination(
             source,
@@ -1034,6 +1285,7 @@ def _run_speech_materialization_command(
             sequence_fallback_mode=sequence_fallback_mode,
             force=force,
             spacy=spacy,
+            pronunciations=speech_replacements,
             on_progress=on_progress,
             report_output=report_output,
             json_output=json_output,
@@ -1062,6 +1314,7 @@ def speech_annotate(
         SpacyPolicy,
         typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
     ] = "off",
+    speech_profile: Annotated[Path | None, typer.Option("--speech-profile")] = None,
     progress: Annotated[
         bool | None,
         typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
@@ -1078,6 +1331,7 @@ def speech_annotate(
         force=force,
         spacy=spacy,
         progress=progress,
+        speech_profile=speech_profile,
     )
 
 
@@ -1103,6 +1357,7 @@ def speech_freeze(
         SpacyPolicy,
         typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
     ] = "off",
+    speech_profile: Annotated[Path | None, typer.Option("--speech-profile")] = None,
     progress: Annotated[
         bool | None,
         typer.Option("--progress/--no-progress", help="Show conversion progress on stderr."),
@@ -1119,6 +1374,7 @@ def speech_freeze(
         force=force,
         spacy=spacy,
         progress=progress,
+        speech_profile=speech_profile,
         report_output=report_output,
         json_output=json_output,
     )
@@ -1312,6 +1568,7 @@ def bundle_convert(
         SpacyPolicy,
         typer.Option("--spacy", help="Use no spaCy hints or a locally installed model tier."),
     ] = "off",
+    speech_profile: Annotated[Path | None, typer.Option("--speech-profile")] = None,
     report_output: Annotated[Path | None, typer.Option("--report-output")] = None,
     report_format: Annotated[
         Literal["markdown", "json"], typer.Option("--report-format")
@@ -1323,6 +1580,8 @@ def bundle_convert(
     ] = None,
 ) -> None:
     """Convert an EPUB or supported document into one editable SSMD bundle."""
+    speech_replacements = _load_speech_replacements(speech_profile)
+    profile_details = _speech_profile_details(speech_profile)
 
     def run(on_progress: ProgressCallback) -> None:
         destination = output or default_bundle_workspace_path(source)
@@ -1348,6 +1607,7 @@ def bundle_convert(
                 ),
                 speech_semantics=speech_semantics,
                 spacy=spacy,
+                pronunciations=speech_replacements,
                 force=force,
                 on_progress=on_progress,
             )
@@ -1372,6 +1632,8 @@ def bundle_convert(
             "kind": result.kind,
             "output": str(_output_path(result.output or destination)),
         }
+        if profile_details is not None:
+            payload["speech_profile"] = profile_details
         if isinstance(result.value, BookConversionResult):
             payload["speech"] = result.value.speech.to_dict()
             payload["chapter_count"] = len(result.value.book.chapters)
@@ -1386,6 +1648,17 @@ def bundle_convert(
                     f"kind: {result.kind}",
                     f"Output: {_output_path(result.output or destination)}",
                 ]
+                if profile_details is not None:
+                    markdown_lines.extend(
+                        [
+                            "",
+                            "Speech profile",
+                            *[
+                                f"- {key.replace('_', ' ')}: {value}"
+                                for key, value in profile_details.items()
+                            ],
+                        ]
+                    )
                 if "speech" in payload:
                     markdown_lines.append(
                         _render_freeze_summary(payload["speech"], operation="Bundle conversion")
@@ -1399,6 +1672,10 @@ def bundle_convert(
             )
         typer.echo(f"Created SSMD bundle: {result.output}")
         typer.echo(f"kind: {result.kind}")
+        if speech_profile is not None and speech_semantics == "preserve":
+            typer.echo(
+                "Speech profile: loaded, not materialized because speech semantics are preserved."
+            )
         if "chapter_count" in payload:
             typer.echo(f"Chapters: {payload['chapter_count']}")
             typer.echo(_render_freeze_summary(payload["speech"], operation="Bundle conversion"))

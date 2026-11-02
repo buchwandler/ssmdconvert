@@ -76,6 +76,8 @@ ssmdconvert speech audit notes.ssmd-bundle --json
 ssmdconvert speech freeze novel.ssmd-bundle.zip -o frozen.ssmd-bundle.zip
 ```
 
+For consistent project vocabulary during fresh EPUB conversion, pass `--speech-profile PATH` to `bundle convert`. All selected chapters use the same mapping before automatic speech freeze; preserve-mode conversion validates the profile but does not materialize it. See [Speech replacement profiles](speech-profiles.md) and [Speech-risk inventory](speech-inventory.md).
+
 Speech writes publish to a new destination; they never mutate a workspace in
 place. Book conversion freezes eligible automatic speech decisions by default.
 Use `--speech-semantics preserve` for structural-only book conversion.

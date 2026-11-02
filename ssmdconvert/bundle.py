@@ -102,6 +102,7 @@ def convert_bundle(
     sequence_fallback_mode: SequenceFallbackMode | None = None,
     speech_semantics: Literal["freeze", "preserve"] = "freeze",
     spacy: SpacyPolicy = "off",
+    pronunciations: Mapping[str, str] | None = None,
     force: bool = False,
     on_progress: ProgressCallback | None = None,
 ) -> BundleConversionResult:
@@ -117,6 +118,7 @@ def convert_bundle(
         sequence_fallback_mode=sequence_fallback_mode,
         speech_semantics=speech_semantics,
         spacy=spacy,
+        pronunciations=pronunciations,
         force=force,
         on_progress=on_progress,
     )

@@ -8,6 +8,7 @@ ssmdconvert speech annotate chapter.ssmd -o annotated.ssmd
 ssmdconvert speech annotate BOOK.ssmd-bundle --chapters 2-4 -o annotated-copy.ssmd-bundle
 ```
 
+`--speech-profile PATH` applies the selected profile to fresh eligible automatic changes before they are written. It never overrides an existing authoritative `sub` annotation. See [Speech replacement profiles](speech-profiles.md) for schema and precedence.
 For a new EPUB artifact, `ssmdconvert bundle convert` freezes eligible automatic decisions during conversion by default; choose `--speech-semantics preserve` for a structural-only result. This one-pass path uses the same analysis/materialization rules described here. `speech annotate` remains useful for existing SSMD sources and review workflows.
 
 For book sources, chapter selectors use original 1-based source numbers. Unselected

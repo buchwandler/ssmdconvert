@@ -9,6 +9,19 @@ if TYPE_CHECKING:
     from .analysis.models import SsmdAnalysis, SsmdAnalysisIssue, SsmdAnalysisReport
     from .analysis.projection import ProjectedText
     from .speech.failures import SpeechFreezeFailure
+    from .speech.inventory import (
+        SpeechInventory,
+        SpeechInventoryCandidate,
+        SpeechInventoryOccurrence,
+        SpeechInventoryOptions,
+    )
+    from .speech.profile import (
+        SpeechReplacementProfile,
+        effective_replacements,
+        load_speech_profile,
+        parse_speech_profile,
+        speech_profile_fingerprint,
+    )
 
 from .api import (
     analyze_cached,
@@ -20,6 +33,7 @@ from .api import (
     convert_document,
     freeze_speech,
     inspect_document,
+    inventory_speech,
     lookup_cached_context,
     lookup_change_context,
     project_text,
@@ -121,6 +135,25 @@ def __getattr__(name: str) -> Any:
         from .speech.failures import SpeechFreezeFailure
 
         return SpeechFreezeFailure
+    if name in {
+        "SpeechInventory",
+        "SpeechInventoryCandidate",
+        "SpeechInventoryOccurrence",
+        "SpeechInventoryOptions",
+    }:
+        from .speech import inventory
+
+        return getattr(inventory, name)
+    if name in {
+        "SpeechReplacementProfile",
+        "effective_replacements",
+        "load_speech_profile",
+        "parse_speech_profile",
+        "speech_profile_fingerprint",
+    }:
+        from .speech import profile
+
+        return getattr(profile, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -163,6 +196,11 @@ __all__ = [
     "SsmdDocument",
     "SourceInfo",
     "SpeechOptions",
+    "SpeechInventory",
+    "SpeechInventoryCandidate",
+    "SpeechInventoryOccurrence",
+    "SpeechInventoryOptions",
+    "SpeechReplacementProfile",
     "SpeechOutcome",
     "SpacyPolicy",
     "TextProjectionOptions",
@@ -185,6 +223,11 @@ __all__ = [
     "lookup_cached_context",
     "lookup_change_context",
     "project_text",
+    "inventory_speech",
+    "effective_replacements",
+    "load_speech_profile",
+    "parse_speech_profile",
+    "speech_profile_fingerprint",
     "BundleConversionResult",
     "BundleInspection",
     "BundleKind",

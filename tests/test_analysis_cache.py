@@ -61,6 +61,64 @@ def test_chapter_cache_reuse_refresh_and_path_independent_analysis_ids(tmp_path:
     assert changed.chapter_cache_misses == 1
 
 
+def test_profile_replacements_invalidate_cache_and_ignore_profile_path(tmp_path: Path) -> None:
+    from ssmdconvert.speech.profile import (
+        effective_replacements,
+        load_speech_profile,
+        parse_speech_profile,
+    )
+
+    source = _source(tmp_path / "profile.ssmd", "ART met B-E.")
+    cache = AnalysisCache(tmp_path / "cache")
+    original = parse_speech_profile(
+        """schema = "ssmdconvert-speech-profile"
+version = 1
+[replacements]
+"ART" = "A R T"
+"B-E" = "B E"
+"""
+    )
+    revised = parse_speech_profile(
+        """schema = "ssmdconvert-speech-profile"
+version = 1
+[replacements]
+"ART" = "art"
+"B-E" = "B E"
+"""
+    )
+    first = analyze_with_cache(
+        source, cache=cache, pronunciations=dict(effective_replacements(original))
+    )
+    changed = analyze_with_cache(
+        source, cache=cache, pronunciations=dict(effective_replacements(revised))
+    )
+
+    assert first.chapter_cache_misses == 1
+    assert changed.chapter_cache_misses == 1
+    assert first.analysis.preparation.override_fingerprint != (
+        changed.analysis.preparation.override_fingerprint
+    )
+
+    profile_a = tmp_path / "profile-a.toml"
+    profile_b = tmp_path / "profile-b.toml"
+    profile_text = """schema = "ssmdconvert-speech-profile"
+version = 1
+[replacements]
+"ART" = "art"
+"B-E" = "B E"
+"""
+    profile_a.write_text(profile_text, encoding="utf-8")
+    profile_b.write_text(profile_text, encoding="utf-8")
+    same_mapping = dict(effective_replacements(load_speech_profile(profile_a)))
+    same_mapping_other = dict(effective_replacements(load_speech_profile(profile_b)))
+    assert same_mapping == same_mapping_other
+    equivalent = analyze_with_cache(source, cache=cache, pronunciations=same_mapping_other)
+    assert equivalent.chapter_cache_hits == 1
+    assert equivalent.analysis.preparation.override_fingerprint == (
+        changed.analysis.preparation.override_fingerprint
+    )
+
+
 def test_snapshot_checksum_rejects_tampering(tmp_path: Path) -> None:
     source = _source(tmp_path / "sample.ssmd")
     cache = AnalysisCache(tmp_path / "cache")

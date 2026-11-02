@@ -6,10 +6,11 @@ import ttsready
 from epub_support import make_epub
 from ssmd import lint, parse_structure
 
-from ssmdconvert import Book, BookChapter
+from ssmdconvert import Book, BookChapter, BookConversionOptions, SpeechOptions
 from ssmdconvert.analysis import analyze_ssmd_source, load_ssmd_source
 from ssmdconvert.analysis.models import LoadedSsmdSection, LoadedSsmdSource
 from ssmdconvert.analysis.units import extract_units
+from ssmdconvert.api import convert_book as convert_book_api
 from ssmdconvert.books import convert_book, render_standalone_chapter
 from ssmdconvert.errors import MaterializationError
 from ssmdconvert.metadata import PORTABLE_SSMD_METADATA_KEYS
@@ -68,6 +69,52 @@ def test_convert_book_selection_preserves_source_numbers(tmp_path: Path) -> None
     assert book.chapters[0].source_number == 2
     assert book.chapters[0].id == "chapter-0002"
     assert book.chapters[0].title == "Two"
+
+
+def test_profile_replacements_are_applied_across_selected_book_chapters(tmp_path: Path) -> None:
+    from ssmdconvert.speech.profile import effective_replacements, parse_speech_profile
+
+    source = tmp_path / "profile-book.epub"
+    make_epub(
+        source,
+        chapter_one_suffix=" ART B-E ART’s.",
+        chapter_two_suffix=" ART B-E.",
+    )
+    profile = parse_speech_profile(
+        """schema = "ssmdconvert-speech-profile"
+version = 1
+[replacements]
+"ART" = "art"
+"B-E" = "B E"
+"""
+    )
+    replacements = effective_replacements(profile)
+    options = BookConversionOptions(speech=SpeechOptions(pronunciations=replacements))
+    structural = convert_book(source, speech_semantics="preserve")
+    frozen = convert_book_api(source, options=options)
+
+    assert len(frozen.book.chapters) == 2
+    for before, after in zip(structural.chapters, frozen.book.chapters, strict=True):
+        assert '[ART]{sub="art"}' in after.ssmd
+        assert '[B-E]{sub="B E"}' in after.ssmd
+        if "ART’s" in before.ssmd:
+            assert '[ART’s]{sub="art’s"}' in after.ssmd
+        assert (
+            parse_structure(before.ssmd, dialect="0.9").clean_text
+            == parse_structure(after.ssmd, dialect="0.9").clean_text
+        )
+
+    selected = convert_book_api(
+        source,
+        options=BookConversionOptions(
+            chapters="2",
+            speech=SpeechOptions(pronunciations=replacements),
+        ),
+    )
+    assert len(selected.book.chapters) == 1
+    assert selected.book.chapters[0].source_number == 2
+    assert '[ART]{sub="art"}' in selected.book.chapters[0].ssmd
+    assert '[B-E]{sub="B E"}' in selected.book.chapters[0].ssmd
 
 
 def test_convert_book_persists_default_sequence_fallback_mode(tmp_path: Path) -> None:

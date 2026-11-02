@@ -83,7 +83,7 @@ def _stored_sequence_fallback(
 
 
 def _pronunciation_overrides(
-    pronunciations: Mapping[str, str],
+    pronunciations: Mapping[str, str], units: tuple[ttsready.TextUnit, ...]
 ) -> tuple[ttsready.SpeechOverride, ...]:
     result: list[ttsready.SpeechOverride] = []
     for surface, spoken in sorted(pronunciations.items()):
@@ -91,15 +91,28 @@ def _pronunciation_overrides(
             raise ValueError("pronunciation keys must be non-empty strings without edge whitespace")
         if not isinstance(spoken, str) or not spoken.strip():
             raise ValueError("pronunciation values must be non-empty strings")
-        result.append(
-            ttsready.SpeechOverride(
-                surface=surface,
-                spoken=spoken,
-                match="word",
-                case_sensitive=True,
-                provenance={"origin": "ssmdconvert", "source": "pronunciation-profile"},
+        if surface.endswith(("'s", "’s")):
+            result.extend(
+                ttsready.SpeechOverride(
+                    surface=surface,
+                    spoken=spoken,
+                    match="word",
+                    case_sensitive=True,
+                    scope=ttsready.OverrideScope(kind="unit", unit_id=unit.id),
+                    provenance={"origin": "ssmdconvert", "source": "speech-profile"},
+                )
+                for unit in units
             )
-        )
+        else:
+            result.append(
+                ttsready.SpeechOverride(
+                    surface=surface,
+                    spoken=spoken,
+                    match="word",
+                    case_sensitive=True,
+                    provenance={"origin": "ssmdconvert", "source": "speech-profile"},
+                )
+            )
     return tuple(result)
 
 
@@ -299,10 +312,13 @@ def analyze_ssmd_source(
         profile or ttsready.PreparationProfile(),
         sequence_fallback_mode=effective_fallback,
     )
+    profile_replacements = pronunciations or {}
+    profile_surfaces = set(profile_replacements)
+    caller_overrides = tuple(item for item in overrides if item.surface not in profile_surfaces)
     all_overrides = (
         *extracted.overrides,
-        *overrides,
-        *_pronunciation_overrides(pronunciations or {}),
+        *_pronunciation_overrides(profile_replacements, extracted.units),
+        *caller_overrides,
     )
     if prepared_result is None:
         pool = LinguisticResourcePool()

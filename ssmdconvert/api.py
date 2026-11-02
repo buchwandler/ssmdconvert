@@ -30,6 +30,12 @@ if TYPE_CHECKING:
     from .analysis.cache import CachedAnalysis
     from .analysis.models import LoadedSsmdSource, SsmdAnalysis, SsmdAnalysisReport
     from .analysis.projection import ProjectedText
+    from .speech.inventory import (
+        SpeechInventory,
+        SpeechInventoryCandidate,
+        SpeechInventoryOccurrence,
+        SpeechInventoryOptions,
+    )
 
 
 def inspect_document(source: str | Path) -> Document:
@@ -135,6 +141,64 @@ def analyze_ssmd(
         pronunciations=dict(selected.pronunciations),
         linguistics=LinguisticsConfig(spacy=selected.spacy),
         on_progress=on_progress,
+    )
+
+
+def inventory_speech(
+    source: str | Path,
+    *,
+    options: SpeechInventoryOptions | None = None,
+) -> SpeechInventory:
+    """Inventory likely speech-risk surfaces from a source or canonical SSMD bundle."""
+    from .analysis.source import (
+        load_ssmd_source,
+        loaded_source_from_book,
+        loaded_source_from_document,
+    )
+    from .books import convert_book as convert_structural_book
+    from .services.bundle_conversion import detect_source_kind
+    from .services.document_conversion import convert_document_artifact
+    from .speech.inventory import SpeechInventoryOptions as InventoryOptions
+    from .speech.inventory import inventory_loaded_source
+
+    selected = InventoryOptions() if options is None else options
+    if not isinstance(selected, InventoryOptions):
+        raise TypeError("options must be a SpeechInventoryOptions instance")
+    path = Path(source).expanduser().resolve(strict=True)
+    lowered_name = path.name.lower()
+    if path.is_dir() or lowered_name.endswith((".ssmd-bundle", ".ssmd-bundle.zip")):
+        loaded = load_ssmd_source(path)
+    elif lowered_name.endswith((".ssmd", ".ssmd.md")):
+        loaded = load_ssmd_source(path)
+    elif detect_source_kind(path) == "book":
+        book = convert_structural_book(
+            path,
+            chapters="all",
+            language=selected.language,
+            speech_semantics="preserve",
+        )
+        loaded = loaded_source_from_book(
+            book,
+            path=path,
+            workspace_type="generated",
+            workspace_status="clean",
+        )
+    else:
+        document = convert_document_artifact(path, language=selected.language)
+        loaded = loaded_source_from_document(
+            document,
+            path=path,
+            workspace_type="generated",
+            workspace_status="clean",
+        )
+    return inventory_loaded_source(
+        loaded,
+        chapters=selected.chapters,
+        language=selected.language,
+        pronunciations=selected.pronunciations,
+        include_existing=selected.include_existing,
+        max_contexts=selected.max_contexts,
+        spacy=selected.spacy,
     )
 
 
@@ -371,4 +435,22 @@ __all__ = [
     "lookup_cached_context",
     "lookup_change_context",
     "project_text",
+    "SpeechInventory",
+    "SpeechInventoryCandidate",
+    "SpeechInventoryOccurrence",
+    "SpeechInventoryOptions",
+    "inventory_speech",
 ]
+
+
+def __getattr__(name: str):
+    if name in {
+        "SpeechInventory",
+        "SpeechInventoryCandidate",
+        "SpeechInventoryOccurrence",
+        "SpeechInventoryOptions",
+    }:
+        from .speech import inventory
+
+        return getattr(inventory, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

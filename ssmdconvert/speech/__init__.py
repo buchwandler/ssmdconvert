@@ -12,6 +12,16 @@ __all__ = [
     "map_analysis_changes",
     "materialize_analysis",
     "materialize_substitutions",
+    "SpeechInventory",
+    "SpeechInventoryCandidate",
+    "SpeechInventoryOccurrence",
+    "SpeechInventoryOptions",
+    "SpeechReplacementProfile",
+    "effective_replacements",
+    "inventory_loaded_source",
+    "load_speech_profile",
+    "parse_speech_profile",
+    "speech_profile_fingerprint",
 ]
 
 
@@ -42,4 +52,24 @@ def __getattr__(name: str) -> Any:
         from .mapping import map_analysis_changes
 
         return map_analysis_changes
+    if name in {
+        "SpeechInventory",
+        "SpeechInventoryCandidate",
+        "SpeechInventoryOccurrence",
+        "SpeechInventoryOptions",
+        "inventory_loaded_source",
+    }:
+        from . import inventory
+
+        return getattr(inventory, name)
+    if name in {
+        "SpeechReplacementProfile",
+        "effective_replacements",
+        "load_speech_profile",
+        "parse_speech_profile",
+        "speech_profile_fingerprint",
+    }:
+        from . import profile
+
+        return getattr(profile, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

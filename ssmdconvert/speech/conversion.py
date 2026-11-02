@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -33,6 +34,7 @@ def materialize_book_speech(
     language: str | None = None,
     sequence_fallback_mode: SequenceFallbackMode | None = None,
     linguistics: LinguisticsConfig | None = None,
+    pronunciations: Mapping[str, str] | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> BookSpeechMaterialization:
     """Freeze safe automatic speech decisions into the selected book's SSMD."""
@@ -50,6 +52,7 @@ def materialize_book_speech(
         sequence_fallback_mode=sequence_fallback_mode,
         include_titles=False,
         linguistics=linguistics,
+        pronunciations=pronunciations,
         on_progress=on_progress,
     )
     if any(issue.code == "analysis.language_unresolved" for issue in analysis.issues):
