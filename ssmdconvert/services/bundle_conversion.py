@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -15,6 +16,13 @@ from ..options import BookConversionOptions, DocumentConversionOptions, SpeechOp
 from ..policy import DEFAULT_SEQUENCE_FALLBACK_MODE, SequenceFallbackMode
 from ..progress import ProgressCallback
 from ..results import BookConversionResult
+from ..speech.profile import (
+    SpeechReplacementProfile,
+    effective_replacements,
+    speech_profile_fingerprint,
+    with_speech_replacement,
+)
+from ..speech.profile_store import resolve_conversion_speech_profile
 
 
 def detect_source_kind(source: str | Path) -> BundleKind:
@@ -38,20 +46,26 @@ def convert_bundle(
     speech_semantics: Literal["freeze", "preserve"] = "freeze",
     spacy: SpacyPolicy = "off",
     pronunciations: Mapping[str, str] | None = None,
+    speech_profile: SpeechReplacementProfile | None = None,
     force: bool = False,
     on_progress: ProgressCallback | None = None,
 ) -> BundleConversionResult:
     """Convert an EPUB or supported document through one bundle lifecycle."""
     source_path = Path(source).expanduser().resolve(strict=True)
     kind = detect_source_kind(source_path)
-    if kind != "book" and pronunciations is not None:
-        raise ValueError("speech profiles are currently supported only for EPUB book conversion")
     destination = (
         default_bundle_workspace_path(source_path) if output is None else Path(output).expanduser()
     )
     if not destination.name.endswith(".ssmd-bundle"):
         raise BundleIdentityError("bundle output must end with '.ssmd-bundle'")
 
+    if speech_profile is not None and pronunciations is not None:
+        raise ValueError("provide either speech_profile or pronunciations, not both")
+    selected_profile = resolve_conversion_speech_profile(destination, speech_profile).profile
+    if pronunciations is not None:
+        for surface, spoken in pronunciations.items():
+            selected_profile = with_speech_replacement(selected_profile, surface, spoken)
+    selected_replacements = effective_replacements(selected_profile)
     if kind == "book":
         if speech_semantics not in {"freeze", "preserve"}:
             raise ValueError("speech_semantics must be 'freeze' or 'preserve'")
@@ -63,14 +77,29 @@ def convert_bundle(
             speech=SpeechOptions(
                 mode=speech_semantics,
                 spacy=spacy,
-                pronunciations={} if pronunciations is None else pronunciations,
+                pronunciations=selected_replacements,
             ),
         )
         from .book_conversion import convert_book_pipeline
 
         book_result = convert_book_pipeline(source_path, options, on_progress=on_progress)
+        if book_result.book.speech_semantics is not None:
+            speech_semantics_data = dict(book_result.book.speech_semantics)
+            if speech_semantics_data.get("status") == "complete":
+                speech_semantics_data["speech_profile_fingerprint"] = speech_profile_fingerprint(
+                    selected_profile
+                )
+                book_result = replace(
+                    book_result,
+                    book=replace(book_result.book, speech_semantics=speech_semantics_data),
+                )
         value: BookConversionResult | SsmdDocument = book_result
-        written = write_bundle(book_result.book, destination, overwrite=force)
+        written = write_bundle(
+            book_result.book,
+            destination,
+            overwrite=force,
+            speech_profile=selected_profile,
+        )
     else:
         if chapters != "all":
             raise ValueError("--chapters is only available for book sources")
@@ -87,5 +116,10 @@ def convert_bundle(
             metadata_overrides=document_options.metadata_overrides,
             sequence_fallback_mode=sequence_fallback_mode,
         )
-        written = write_bundle(value, destination, overwrite=force)
+        written = write_bundle(
+            value,
+            destination,
+            overwrite=force,
+            speech_profile=selected_profile,
+        )
     return BundleConversionResult(kind=kind, value=value, output=written)

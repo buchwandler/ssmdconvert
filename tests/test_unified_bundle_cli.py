@@ -76,20 +76,98 @@ version = 1
 
     document = tmp_path / "profile.md"
     document.write_text("# Document\n\nART B-E.\n", encoding="utf-8")
-    rejected = runner.invoke(
+    document_output = tmp_path / "document.ssmd-bundle"
+    document_result = runner.invoke(
         app,
         [
             "bundle",
             "convert",
             str(document),
             "-o",
-            str(tmp_path / "document.ssmd-bundle"),
+            str(document_output),
             "--speech-profile",
             str(profile),
         ],
     )
-    assert rejected.exit_code != 0
-    assert "only for EPUB book conversion" in rejected.output
+    assert document_result.exit_code == 0, document_result.output
+    stored_profile = (document_output / "speech.toml").read_text(encoding="utf-8")
+    assert '"ART" = "art"' in stored_profile
+    assert '"B-E" = "B E"' in stored_profile
+
+
+def test_forced_conversion_reuses_destination_profile_without_external_option(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "profile-rebuild.epub"
+    make_epub(source, chapter_one_suffix=" ART B-E.")
+    output = tmp_path / "profile-rebuild.ssmd-bundle"
+    initial = runner.invoke(app, ["bundle", "convert", str(source), "-o", str(output)])
+    assert initial.exit_code == 0, initial.output
+    (output / "speech.toml").write_text(
+        """schema = "ssmdconvert-speech-profile"
+version = 1
+[replacements]
+"ART" = "art"
+"B-E" = "B E"
+""",
+        encoding="utf-8",
+    )
+
+    rebuilt = runner.invoke(
+        app,
+        ["bundle", "convert", str(source), "-o", str(output), "--force"],
+    )
+    assert rebuilt.exit_code == 0, rebuilt.output
+    book = load_book_bundle(output)
+    assert '[ART]{sub="art"}' in book.chapters[0].ssmd
+    assert '[B-E]{sub="B E"}' in book.chapters[0].ssmd
+    stored_profile = (output / "speech.toml").read_text(encoding="utf-8")
+    assert '"ART" = "art"' in stored_profile
+    assert '"B-E" = "B E"' in stored_profile
+
+    external = tmp_path / "override.toml"
+    external.write_text(
+        'schema = "ssmdconvert-speech-profile"\nversion = 1\n[replacements]\n"ART" = "A R T"\n',
+        encoding="utf-8",
+    )
+    overridden = runner.invoke(
+        app,
+        [
+            "bundle",
+            "convert",
+            str(source),
+            "-o",
+            str(output),
+            "--force",
+            "--speech-profile",
+            str(external),
+        ],
+    )
+    assert overridden.exit_code == 0, overridden.output
+    assert "replacing bundle-local profile" in overridden.output
+    assert '[ART]{sub="A R T"}' in load_book_bundle(output).chapters[0].ssmd
+    assert '"ART" = "A R T"' in (output / "speech.toml").read_text(encoding="utf-8")
+
+
+def test_invalid_destination_profile_aborts_forced_rebuild_untouched(tmp_path: Path) -> None:
+    source = tmp_path / "invalid-rebuild.epub"
+    make_epub(source, chapter_one_suffix=" ART.")
+    output = tmp_path / "invalid-rebuild.ssmd-bundle"
+    initial = runner.invoke(app, ["bundle", "convert", str(source), "-o", str(output)])
+    assert initial.exit_code == 0, initial.output
+    chapter_path = output / "chapters" / "chapter-0001.ssmd.md"
+    original_chapter = chapter_path.read_bytes()
+    invalid_profile = output / "speech.toml"
+    invalid_profile.write_text("not a speech profile", encoding="utf-8")
+
+    rebuilt = runner.invoke(
+        app,
+        ["bundle", "convert", str(source), "-o", str(output), "--force"],
+    )
+    assert rebuilt.exit_code != 0
+    assert "invalid speech profile" in rebuilt.output
+    assert chapter_path.read_bytes() == original_chapter
+    assert invalid_profile.read_text(encoding="utf-8") == "not a speech profile"
 
 
 @pytest.mark.parametrize("kind", ["book", "document"])

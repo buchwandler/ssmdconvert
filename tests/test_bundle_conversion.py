@@ -15,6 +15,12 @@ from ssmdconvert.bundle import (
 )
 from ssmdconvert.errors import BundleIdentityError
 from ssmdconvert.results import BookConversionResult
+from ssmdconvert.speech.profile import (
+    empty_speech_profile,
+    parse_speech_profile,
+    speech_profile_fingerprint,
+    with_speech_replacement,
+)
 
 VALID_SSMD = '---\nssmd_version: "0.9"\ntitle: "Story"\n---\n\nHello.\n'
 
@@ -69,6 +75,53 @@ def test_public_book_conversion_bundle_contains_frozen_speech_aliases(tmp_path: 
     clean_text = parse_structure(chapter.ssmd, dialect="0.9", normalize=False).clean_text
     assert "Because someone (ART) approved it. ART’s module stayed open." in clean_text
     assert "Later ART checked the open/close control and asked where/who." in clean_text
+
+
+def test_bundle_conversion_reuses_and_overrides_destination_speech_profile(tmp_path: Path) -> None:
+    source = tmp_path / "profiled.epub"
+    make_epub(source, chapter_one_suffix=" ART approved the change.")
+    output = tmp_path / "profiled.ssmd-bundle"
+    initial_profile = with_speech_replacement(empty_speech_profile(), "ART", "art")
+
+    first = convert_bundle(
+        source,
+        output=output,
+        chapters="1",
+        speech_profile=initial_profile,
+    )
+    assert first.output == output
+    first_profile = (output / "speech.toml").read_text(encoding="utf-8")
+    assert parse_speech_profile(first_profile) == initial_profile
+
+    make_epub(source, chapter_one_suffix=" ART approved the rebuilt change.")
+    rebuilt = convert_bundle(source, output=output, chapters="1", force=True)
+    assert rebuilt.output == output
+    assert (output / "speech.toml").read_text(encoding="utf-8") == first_profile
+    rebuilt_bundle = load_bundle(output)
+    assert isinstance(rebuilt_bundle.value, Book)
+    assert rebuilt_bundle.value.speech_semantics is not None
+    assert rebuilt_bundle.value.speech_semantics["speech_profile_fingerprint"] == (
+        speech_profile_fingerprint(initial_profile)
+    )
+
+    override_profile = with_speech_replacement(empty_speech_profile(), "ART", "A R T")
+    overridden = convert_bundle(
+        source,
+        output=output,
+        chapters="1",
+        speech_profile=override_profile,
+        force=True,
+    )
+    assert overridden.output == output
+    assert parse_speech_profile((output / "speech.toml").read_text(encoding="utf-8")) == (
+        override_profile
+    )
+    overridden_bundle = load_bundle(output)
+    assert isinstance(overridden_bundle.value, Book)
+    assert overridden_bundle.value.speech_semantics is not None
+    assert overridden_bundle.value.speech_semantics["speech_profile_fingerprint"] == (
+        speech_profile_fingerprint(override_profile)
+    )
 
 
 def test_convert_standalone_ssmd_source_uses_stem_without_double_extension(

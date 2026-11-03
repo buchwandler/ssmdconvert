@@ -23,6 +23,9 @@ An optional `speech_semantics` object records speech-freeze provenance. Existing
 metadata fields and schema version are unchanged by the unified outer bundle
 name.
 
+A workspace may also contain a root-level `speech.toml` sidecar. It is validated when present, but is intentionally not a manifest member and is not included in chapter/document content hashes. Legacy bundles without the sidecar remain valid. New public bundle writes include a canonical profile; packing a legacy workspace emits the canonical empty profile. ZIP packing places `speech.toml` after `manifest.json` and before referenced SSMD content.
+Complete `speech_semantics` may also include the optional `speech_profile_fingerprint`: the canonical SSMDConvert replacement-profile hash. It is distinct from the existing TTSReady preparation `profile_fingerprint`; older complete provenance without the optional field remains valid.
+
 ## Validation and workspace behavior
 
 Strict loading and validation check the manifest format and versions, normalized

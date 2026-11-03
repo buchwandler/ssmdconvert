@@ -22,6 +22,11 @@ __all__ = [
     "load_speech_profile",
     "parse_speech_profile",
     "speech_profile_fingerprint",
+    "empty_speech_profile",
+    "render_speech_profile",
+    "write_speech_profile",
+    "with_speech_replacement",
+    "without_speech_replacement",
 ]
 
 
@@ -67,6 +72,11 @@ def __getattr__(name: str) -> Any:
         "effective_replacements",
         "load_speech_profile",
         "parse_speech_profile",
+        "empty_speech_profile",
+        "render_speech_profile",
+        "write_speech_profile",
+        "with_speech_replacement",
+        "without_speech_replacement",
         "speech_profile_fingerprint",
     }:
         from . import profile

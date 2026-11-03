@@ -8,9 +8,13 @@ import ttsready
 from ssmdconvert.speech.profile import (
     SpeechReplacementProfile,
     effective_replacements,
+    empty_speech_profile,
     load_speech_profile,
     parse_speech_profile,
+    render_speech_profile,
     speech_profile_fingerprint,
+    with_speech_replacement,
+    without_speech_replacement,
 )
 
 _VALID = """schema = "ssmdconvert-speech-profile"
@@ -139,3 +143,49 @@ def test_ttsready_word_override_matches_b_e_but_not_larger_hyphenated_surface() 
     assert len(matched.changes) == 1
     assert unrelated.spoken_text == "X-B-E-Y"
     assert unrelated.changes == ()
+
+
+def test_empty_profile_round_trips_with_canonical_empty_replacements_table() -> None:
+    profile = empty_speech_profile()
+    rendered = render_speech_profile(profile)
+
+    assert rendered == (
+        'schema = "ssmdconvert-speech-profile"\n'
+        "version = 1\n"
+        "derive_possessives = true\n\n"
+        "[replacements]\n"
+    )
+    assert parse_speech_profile(rendered) == profile
+
+
+def test_profile_rendering_is_deterministic_sorted_and_toml_quoted() -> None:
+    profile = parse_speech_profile(
+        'schema = "ssmdconvert-speech-profile"\n'
+        "version = 1\n"
+        "[replacements]\n"
+        '"z" = "back\\\\slash"\n'
+        '"a\\"é" = "line\\nfeed \'quote\'"\n'
+    )
+
+    rendered = render_speech_profile(profile)
+    assert rendered.endswith("\n") and not rendered.endswith("\n\n")
+    assert rendered.index('"a\\"é"') < rendered.index('"z"')
+    assert parse_speech_profile(rendered) == profile
+    assert speech_profile_fingerprint(parse_speech_profile(rendered)) == speech_profile_fingerprint(
+        profile
+    )
+
+
+def test_profile_mutators_return_independent_profiles() -> None:
+    original = parse_speech_profile(_VALID)
+    added = with_speech_replacement(original, "NEW", "New Name")
+    updated = with_speech_replacement(added, "ART", "A R T")
+    removed = without_speech_replacement(updated, "B-E")
+
+    assert dict(original.replacements) == {"ART": "art", "B-E": "B E"}
+    assert dict(added.replacements)["ART"] == "art"
+    assert dict(updated.replacements)["ART"] == "A R T"
+    assert dict(removed.replacements) == {"ART": "A R T", "NEW": "New Name"}
+    assert original.derive_possessives is added.derive_possessives
+    with pytest.raises(ValueError, match="no explicit replacement"):
+        without_speech_replacement(original, "MISSING")

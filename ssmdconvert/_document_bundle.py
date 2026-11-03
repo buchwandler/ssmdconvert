@@ -15,7 +15,7 @@ import zipfile
 import zlib
 from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, NoReturn, TypeGuard
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, TypeGuard
 
 from .errors import DocumentBundleError, DocumentBundleValidationError
 from .models import (
@@ -25,6 +25,11 @@ from .models import (
     WorkspaceDocumentStatus,
 )
 from .render import validate_ssmd_document
+
+if TYPE_CHECKING:
+    from .speech.profile import SpeechReplacementProfile
+else:
+    SpeechReplacementProfile = Any
 
 _DOCUMENT_FORMAT = "ssmdconvert.document"
 _DOCUMENT_SCHEMA_VERSION = 1
@@ -36,6 +41,7 @@ _WINDOWS_DRIVE = re.compile(r"[A-Za-z]:")
 _FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 _MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 _MAX_DOCUMENT_BYTES = 64 * 1024 * 1024
+_MAX_SPEECH_PROFILE_BYTES = 1024 * 1024
 _MAX_ARCHIVE_MEMBERS = 10_000
 
 
@@ -114,6 +120,17 @@ def _json_value(value: Any, display: str) -> Any:
     _invalid(display, f"metadata contains a non-JSON value: {type(value).__name__}")
 
 
+def _validate_speech_profile_bytes(raw: bytes, display: str) -> None:
+    from .speech.profile import parse_speech_profile
+
+    if len(raw) > _MAX_SPEECH_PROFILE_BYTES:
+        _invalid(display, "speech.toml exceeds the 1 MiB size limit")
+    try:
+        parse_speech_profile(raw.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, TypeError, ValueError) as exc:
+        _invalid(display, f"speech.toml is not a valid version-1 speech profile: {exc}")
+
+
 def _validate_speech_semantics(value: Any, display: str) -> None:
     if not isinstance(value, dict):
         _invalid(display, "manifest speech_semantics must be a JSON object")
@@ -150,6 +167,15 @@ def _validate_speech_semantics(value: Any, display: str) -> None:
                 _invalid(
                     display, f"complete speech_semantics {key} must be a lowercase SHA256 digest"
                 )
+
+        if "speech_profile_fingerprint" in value and not _is_sha256(
+            value["speech_profile_fingerprint"]
+        ):
+            _invalid(
+                display,
+                "complete speech_semantics speech_profile_fingerprint "
+                "must be a lowercase SHA256 digest",
+            )
 
 
 def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
@@ -389,6 +415,12 @@ def _read_directory_bundle(
         root, "manifest.json", display, max_bytes=_MAX_MANIFEST_BYTES
     )
     manifest = _parse_manifest(manifest_bytes, display)
+    profile_path = root / "speech.toml"
+    if profile_path.exists() or profile_path.is_symlink():
+        profile_bytes = _read_directory_file(
+            root, "speech.toml", display, max_bytes=_MAX_SPEECH_PROFILE_BYTES
+        )
+        _validate_speech_profile_bytes(profile_bytes, display)
     statuses: list[WorkspaceDocumentStatus] | None = [] if workspace else None
     document = _document_from_manifest(
         manifest,
@@ -444,6 +476,15 @@ def _read_zip_bundle(source: Path) -> SsmdDocument:
         if len(manifest_bytes) > _MAX_MANIFEST_BYTES:
             _invalid(display, "ZIP manifest.json exceeds the size limit")
         manifest = _parse_manifest(manifest_bytes, display)
+        profile_info = members.get("speech.toml")
+        if profile_info is not None:
+            if profile_info.is_dir() or profile_info.file_size > _MAX_SPEECH_PROFILE_BYTES:
+                _invalid(display, "ZIP speech.toml is invalid or exceeds the 1 MiB size limit")
+            try:
+                profile_bytes = archive.read(profile_info)
+            except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
+                _invalid(display, f"could not read ZIP speech.toml: {exc}")
+            _validate_speech_profile_bytes(profile_bytes, display)
 
         def read_member(name: str) -> bytes:
             info = members.get(name)
@@ -462,9 +503,18 @@ def _read_zip_bundle(source: Path) -> SsmdDocument:
         return _document_from_manifest(manifest, read_member, display)
 
 
-def _write_zip(target: Path, manifest: bytes, document: bytes) -> None:
+def _write_zip(
+    target: Path,
+    manifest: bytes,
+    document: bytes,
+    speech_profile: bytes | None = None,
+) -> None:
+    members = [("manifest.json", manifest)]
+    if speech_profile is not None:
+        members.append(("speech.toml", speech_profile))
+    members.append((_DOCUMENT_PATH, document))
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for name, data in (("manifest.json", manifest), (_DOCUMENT_PATH, document)):
+        for name, data in members:
             info = zipfile.ZipInfo(name, _FIXED_ZIP_TIME)
             info.create_system = 3
             info.external_attr = (stat.S_IFREG | 0o644) << 16
@@ -472,9 +522,18 @@ def _write_zip(target: Path, manifest: bytes, document: bytes) -> None:
             archive.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
 
 
-def _write_directory(target: Path, manifest: bytes, document: bytes) -> None:
+def _write_directory(
+    target: Path,
+    manifest: bytes,
+    document: bytes,
+    speech_profile: bytes | None = None,
+) -> None:
     root = target.resolve()
-    for name, data in (("manifest.json", manifest), (_DOCUMENT_PATH, document)):
+    members = [("manifest.json", manifest)]
+    if speech_profile is not None:
+        members.append(("speech.toml", speech_profile))
+    members.append((_DOCUMENT_PATH, document))
+    for name, data in members:
         normalized = _validate_relative_path(name, str(target))
         destination = root.joinpath(*PurePosixPath(normalized).parts)
         if not _is_below(destination.resolve(strict=False), root):
@@ -520,7 +579,14 @@ def _publish_path_no_replace(source: Path, target: Path) -> None:
         raise
 
 
-def _write_zip_atomic(target: Path, manifest: bytes, document: bytes, *, overwrite: bool) -> None:
+def _write_zip_atomic(
+    target: Path,
+    manifest: bytes,
+    document: bytes,
+    *,
+    overwrite: bool,
+    speech_profile: bytes | None = None,
+) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.is_symlink() or (target.exists() and target.is_dir()):
         raise DocumentBundleError(f"ZIP bundle output must be a regular file: {target}")
@@ -530,7 +596,7 @@ def _write_zip_atomic(target: Path, manifest: bytes, document: bytes, *, overwri
     os.close(fd)
     temporary = Path(temporary_name)
     try:
-        _write_zip(temporary, manifest, document)
+        _write_zip(temporary, manifest, document, speech_profile)
         os.chmod(temporary, 0o644)
         _read_zip_bundle(temporary)
         if overwrite:
@@ -557,6 +623,7 @@ def _write_directory_atomic(
     document: bytes,
     *,
     overwrite: bool,
+    speech_profile: bytes | None = None,
 ) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.is_symlink() or (target.exists() and not target.is_dir()):
@@ -566,7 +633,7 @@ def _write_directory_atomic(
     temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=target.parent))
     backup: Path | None = None
     try:
-        _write_directory(temporary, manifest, document)
+        _write_directory(temporary, manifest, document, speech_profile)
         _read_directory_bundle(temporary)
         if _destination_exists(target):
             if not overwrite:
@@ -595,19 +662,39 @@ def write_document_bundle(
     output: str | Path,
     *,
     format: Literal["directory", "zip"],
+    speech_profile: SpeechReplacementProfile | None = None,
     overwrite: bool = False,
 ) -> Path:
     """Atomically write a strict single-document directory or ZIP bundle."""
     if format not in ("directory", "zip"):
         raise DocumentBundleError("bundle format must be 'directory' or 'zip'")
+    from .speech.profile import render_speech_profile
+
     manifest, document_bytes = _manifest_for_document(document)
+    profile_bytes = (
+        render_speech_profile(speech_profile).encode("utf-8")
+        if speech_profile is not None
+        else None
+    )
     raw_target = Path(os.path.abspath(Path(output).expanduser()))
     target = raw_target.parent.resolve() / raw_target.name
     try:
         if format == "zip":
-            _write_zip_atomic(target, manifest, document_bytes, overwrite=overwrite)
+            _write_zip_atomic(
+                target,
+                manifest,
+                document_bytes,
+                overwrite=overwrite,
+                speech_profile=profile_bytes,
+            )
         else:
-            _write_directory_atomic(target, manifest, document_bytes, overwrite=overwrite)
+            _write_directory_atomic(
+                target,
+                manifest,
+                document_bytes,
+                overwrite=overwrite,
+                speech_profile=profile_bytes,
+            )
     except DocumentBundleError:
         raise
     except OSError as exc:

@@ -4,17 +4,21 @@
 
 ## Sources and examples
 
-Inventory accepts raw EPUB, supported single-document sources, standalone `.ssmd` / `.ssmd.md`, `.ssmd-bundle` workspaces, and `.ssmd-bundle.zip` archives. A raw EPUB is structurally converted in memory with speech semantics preserved; inventory writes no temporary bundle. Bundle and SSMD inputs use the canonical loader/parser and include existing `sub` annotations by default.
+Inventory accepts raw EPUB, supported single-document sources, standalone `.ssmd` / `.ssmd.md`, `.ssmd-bundle` workspaces, and `.ssmd-bundle.zip` archives. A raw EPUB is structurally converted in memory with speech semantics preserved; inventory writes no temporary bundle. Bundle and SSMD inputs use the canonical loader/parser and include existing `sub` annotations by default. For either bundle form, `speech.toml` is discovered automatically; an explicit `--speech-profile` overrides it. A legacy bundle without the sidecar behaves as an empty profile, and no ambient directories are searched.
 
 ```bash
 # Inspect before creating a frozen bundle.
 ssmdconvert speech inventory novel.epub --chapters all
-ssmdconvert speech inventory novel.epub --format toml -o speech.toml
 
-# Inventory an existing preserved workspace, then reuse the profile.
-ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle --speech-semantics preserve
-ssmdconvert speech inventory novel.ssmd-bundle --format toml -o speech.toml
-ssmdconvert speech freeze novel.ssmd-bundle --speech-profile speech.toml -o spoken.ssmd-bundle
+# Inventory a source before conversion and use the reviewed profile once.
+ssmdconvert speech inventory novel.epub --format toml -o speech.toml
+ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle --speech-profile speech.toml
+
+# Or use and edit the recipe owned by an existing workspace.
+ssmdconvert speech inventory novel.ssmd-bundle
+ssmdconvert speech set novel.ssmd-bundle ART art
+ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle --force
+ssmdconvert speech freeze novel.ssmd-bundle -o spoken.ssmd-bundle
 ```
 
 The first command prints a review table. `-o, --output PATH` writes the selected format atomically; existing files are refused unless `--force` is supplied. The source cannot be used as output, and a bundle-workspace inventory must be written outside that workspace.
@@ -25,7 +29,7 @@ The first command prints a review table. `-o, --output PATH` writes the selected
 --chapters SELECTOR                default: all
 --language LANG                    base-language override
 --spacy off|auto|sm|md|lg|trf       default: off
---speech-profile PATH              explicitly selected TOML profile
+--speech-profile PATH              explicit TOML profile override
 --format table|json|toml           default: table
 -o, --output PATH
 --force
@@ -33,7 +37,7 @@ The first command prints a review table. `-o, --output PATH` writes the selected
 --max-contexts N                   default: 2
 ```
 
-`--speech-profile` only marks inventory candidates as covered and shows their effective replacement. It never changes the input. `--include-existing` controls discovery from SSMD substitutions; parser-clean visible text is still scanned either way. `--max-contexts` bounds example contexts per candidate, not occurrence counts.
+A selected profile, whether explicit or discovered from a bundle, marks inventory candidates as covered and shows the effective replacement. It never changes the input. An explicit `--speech-profile` overrides the local recipe for this operation only. `--include-existing` controls discovery from SSMD substitutions; parser-clean visible text is still scanned either way. `--max-contexts` bounds example contexts per candidate, not occurrence counts.
 
 ## Signals
 
@@ -59,11 +63,11 @@ The default table lists surface, occurrence count, signals, current spoken form,
 
 ### JSON
 
-JSON is deterministic and versioned with schema `ssmdconvert.speech-inventory`, version `1`. The top-level object contains `source`, selected `chapters`, `candidate_count`, `speech_profile` metadata (null when no profile is selected; otherwise schema, version, explicit/effective replacement counts, and canonical fingerprint), and grouped `candidates`. Candidate records include reasons, section IDs, existing spoken forms, profile replacement/shadow status, and bounded occurrence contexts with optional linguistic metadata.
+JSON is deterministic and versioned with schema `ssmdconvert.speech-inventory`, version `1`. The top-level object contains `source`, selected `chapters`, `candidate_count`, `speech_profile` metadata (null when no profile is in effect, such as an unprofiled standalone source; otherwise schema, version, explicit/effective replacement counts, and canonical fingerprint), and grouped `candidates`. Candidate records include reasons, section IDs, existing spoken forms, profile replacement/shadow status, and bounded occurrence contexts with optional linguistic metadata.
 
 ### TOML template
 
-`--format toml` emits a valid version-1 speech profile. Unresolved candidates are comments, never active entries with empty values. When `--speech-profile` is supplied, its explicit active entries and possessive-derivation setting are preserved; additional uncovered candidates are shown as commented suggestions. Review the template and fill in spoken forms before using it as a profile.
+`--format toml` emits a valid version-1 speech profile. Unresolved candidates are comments, never active entries with empty values. When an explicit profile or a bundle-local profile is selected, its explicit active entries and possessive-derivation setting are preserved; additional uncovered candidates are shown as commented suggestions. Review the template and fill in spoken forms before using it as a profile.
 
 ```toml
 schema = "ssmdconvert-speech-profile"

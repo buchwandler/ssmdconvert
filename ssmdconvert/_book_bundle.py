@@ -12,11 +12,16 @@ import zipfile
 import zlib
 from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, NoReturn, TypeGuard
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, TypeGuard
 
 from .errors import BookBundleError, BookBundleValidationError
 from .models import Book, BookChapter, BookWorkspace, SourceInfo, WorkspaceChapterStatus
 from .render import validate_ssmd_document
+
+if TYPE_CHECKING:
+    from .speech.profile import SpeechReplacementProfile
+else:
+    SpeechReplacementProfile = Any
 
 _FORMAT = "ssmdconvert.book"
 _SCHEMA_VERSION = 1
@@ -28,6 +33,7 @@ _FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 _MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 _MAX_CHAPTER_BYTES = 64 * 1024 * 1024
 _MAX_TOTAL_CHAPTER_BYTES = 512 * 1024 * 1024
+_MAX_SPEECH_PROFILE_BYTES = 1024 * 1024
 _MAX_ARCHIVE_MEMBERS = 10_000
 
 
@@ -87,6 +93,17 @@ def _validate_source_name(value: Any, display: str) -> str:
     return value
 
 
+def _validate_speech_profile_bytes(raw: bytes, display: str) -> None:
+    from .speech.profile import parse_speech_profile
+
+    if len(raw) > _MAX_SPEECH_PROFILE_BYTES:
+        _invalid(display, "speech.toml exceeds the 1 MiB size limit")
+    try:
+        parse_speech_profile(raw.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, TypeError, ValueError) as exc:
+        _invalid(display, f"speech.toml is not a valid version-1 speech profile: {exc}")
+
+
 def _validate_speech_semantics(value: Any, display: str) -> None:
     if not isinstance(value, dict):
         _invalid(display, "manifest speech_semantics must be a JSON object")
@@ -125,6 +142,14 @@ def _validate_speech_semantics(value: Any, display: str) -> None:
                     display,
                     f"complete speech_semantics {key} must be a lowercase SHA256 digest",
                 )
+        if "speech_profile_fingerprint" in value and not _is_sha256(
+            value["speech_profile_fingerprint"]
+        ):
+            _invalid(
+                display,
+                "complete speech_semantics speech_profile_fingerprint "
+                "must be a lowercase SHA256 digest",
+            )
 
 
 def _validate_manifest(value: Any, display: str) -> dict[str, Any]:
@@ -367,6 +392,15 @@ def _read_directory_bundle(source: Path) -> Book:
         max_bytes=_MAX_MANIFEST_BYTES,
     )
     manifest = _parse_manifest(manifest_bytes, display)
+    profile_path = root / "speech.toml"
+    if profile_path.exists() or profile_path.is_symlink():
+        profile_bytes = _read_directory_file(
+            root,
+            "speech.toml",
+            display,
+            max_bytes=_MAX_SPEECH_PROFILE_BYTES,
+        )
+        _validate_speech_profile_bytes(profile_bytes, display)
     total_chapter_bytes = 0
 
     def read_chapter(name: str) -> bytes:
@@ -422,6 +456,15 @@ def _read_zip_bundle(source: Path) -> Book:
         if len(manifest_bytes) > _MAX_MANIFEST_BYTES:
             _invalid(display, "ZIP manifest.json exceeds the size limit")
         manifest = _parse_manifest(manifest_bytes, display)
+        profile_info = members.get("speech.toml")
+        if profile_info is not None:
+            if profile_info.is_dir() or profile_info.file_size > _MAX_SPEECH_PROFILE_BYTES:
+                _invalid(display, "ZIP speech.toml is invalid or exceeds the 1 MiB size limit")
+            try:
+                profile_bytes = archive.read(profile_info)
+            except (OSError, EOFError, RuntimeError, zipfile.BadZipFile, zlib.error) as exc:
+                _invalid(display, f"could not read ZIP speech.toml: {exc}")
+            _validate_speech_profile_bytes(profile_bytes, display)
         total_chapter_bytes = 0
 
         def read_member(name: str) -> bytes:
@@ -667,11 +710,17 @@ def write_book_bundle(
     *,
     format: Literal["directory", "zip"],
     overwrite: bool = False,
+    speech_profile: SpeechReplacementProfile | None = None,
 ) -> Path:
     """Write a complete directory or ZIP bundle atomically beside its destination."""
     if format not in ("directory", "zip"):
         raise BookBundleError("bundle format must be 'directory' or 'zip'")
     manifest, chapters = _manifest_for_book(book)
+    if speech_profile is not None:
+        from .speech.profile import render_speech_profile
+
+        profile_bytes = render_speech_profile(speech_profile).encode("utf-8")
+        chapters = [("speech.toml", profile_bytes), *chapters]
     raw_target = Path(os.path.abspath(Path(output).expanduser()))
     target = raw_target.parent.resolve() / raw_target.name
     try:

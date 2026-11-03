@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from ssmdconvert._document_bundle import (
 )
 from ssmdconvert.errors import DocumentBundleError, DocumentBundleValidationError
 from ssmdconvert.models import SourceInfo, SsmdDocument
+from ssmdconvert.speech.profile import parse_speech_profile, render_speech_profile
 
 SSMD = (
     '---\nssmd_version: "0.9"\ntitle: "Funny printer story"\nlanguage: "en"\n---\n\nHello, 世界.\n'
@@ -61,6 +63,36 @@ def test_directory_and_zip_roundtrip_and_canonical_members(tmp_path: Path) -> No
     assert manifest["schema_version"] == 1
     assert manifest["source"]["sha256"] == SOURCE_SHA256
     assert manifest["document"]["char_count"] == len(SSMD)
+
+
+def test_document_bundle_profile_roundtrip_and_validation(tmp_path: Path) -> None:
+    profile = parse_speech_profile(
+        'schema = "ssmdconvert-speech-profile"\nversion = 1\n[replacements]\n"ART" = "art"\n'
+    )
+    workspace = write_document_bundle(
+        artifact(),
+        tmp_path / "profiled.ssmd-bundle",
+        format="directory",
+        speech_profile=profile,
+    )
+    assert (workspace / "speech.toml").read_text(encoding="utf-8") == render_speech_profile(profile)
+    archive = write_document_bundle(
+        artifact(),
+        tmp_path / "profiled.ssmd-bundle.zip",
+        format="zip",
+        speech_profile=profile,
+    )
+    with zipfile.ZipFile(archive) as bundle:
+        assert bundle.namelist() == ["manifest.json", "speech.toml", "document.ssmd.md"]
+        assert bundle.read("speech.toml").decode("utf-8") == render_speech_profile(profile)
+
+    bad_archive = tmp_path / "bad.ssmd-bundle.zip"
+    with zipfile.ZipFile(archive) as source, zipfile.ZipFile(bad_archive, "w") as target:
+        for name in source.namelist():
+            payload = b"invalid" if name == "speech.toml" else source.read(name)
+            target.writestr(name, payload)
+    with pytest.raises(DocumentBundleValidationError, match="speech.toml"):
+        load_document_bundle(bad_archive)
 
 
 def test_zip_publication_is_deterministic(tmp_path: Path) -> None:
@@ -210,3 +242,28 @@ def test_zip_duplicate_names_and_symlinks_are_rejected(tmp_path: Path) -> None:
         target.writestr(entry, "../../outside")
     with pytest.raises(DocumentBundleValidationError, match="symlink"):
         load_document_bundle(symlink)
+
+
+def test_document_bundle_validates_optional_speech_profile_fingerprint(
+    tmp_path: Path,
+) -> None:
+    semantics = {
+        "status": "complete",
+        "owner": "ssmdconvert",
+        "engine": "ttsready",
+        "source_sha256": SOURCE_SHA256,
+        "ttsready_version": "1.0",
+        "spokenform_version": "1.0",
+        "profile_fingerprint": "a" * 64,
+        "override_fingerprint": "b" * 64,
+        "runtime_fingerprint": "c" * 64,
+        "prepared_fingerprint": "d" * 64,
+        "speech_profile_fingerprint": "not-a-sha256",
+    }
+    invalid = replace(artifact(), speech_semantics=semantics)
+    with pytest.raises(DocumentBundleValidationError, match="speech_profile_fingerprint"):
+        write_document_bundle(
+            invalid,
+            tmp_path / "invalid-provenance.ssmd-bundle",
+            format="directory",
+        )

@@ -40,6 +40,8 @@ assert validate_bundle(archive) == workspace.kind
 `metadata_overrides`, `speech_semantics`, and local spaCy policy. `chapters` is
 meaningful for books; a document accepts only the default `all` selector.
 
+For bundle conversion, pass a `SpeechReplacementProfile` object with `speech_profile=` to initialize or explicitly replace the destination recipe. When omitted, `convert_bundle()` reuses a valid `speech.toml` from an existing recognized destination workspace, or uses an empty profile for a new destination. Profile selection completes before forced output replacement, and the chosen profile is stored in the resulting bundle. The CLI additionally discovers the recipe from bundle inputs; Python analysis/inventory APIs continue to accept profile replacements through their explicit options.
+
 ```{autofunction} ssmdconvert.convert_bundle
 
 ```

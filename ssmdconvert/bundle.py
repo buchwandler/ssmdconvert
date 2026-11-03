@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from . import _book_bundle, _document_bundle
 from .bundle_identity import (
@@ -30,6 +30,11 @@ from .models import (
 from .policy import SequenceFallbackMode
 from .progress import ProgressCallback
 from .results import BookConversionResult
+
+if TYPE_CHECKING:
+    from .speech.profile import SpeechReplacementProfile
+else:
+    SpeechReplacementProfile = Any
 
 BundleValue = Book | SsmdDocument
 BundleInspectionValue = BookInspection | Book | Document | SsmdDocument
@@ -103,6 +108,7 @@ def convert_bundle(
     speech_semantics: Literal["freeze", "preserve"] = "freeze",
     spacy: SpacyPolicy = "off",
     pronunciations: Mapping[str, str] | None = None,
+    speech_profile: SpeechReplacementProfile | None = None,
     force: bool = False,
     on_progress: ProgressCallback | None = None,
 ) -> BundleConversionResult:
@@ -119,6 +125,7 @@ def convert_bundle(
         speech_semantics=speech_semantics,
         spacy=spacy,
         pronunciations=pronunciations,
+        speech_profile=speech_profile,
         force=force,
         on_progress=on_progress,
     )
@@ -169,6 +176,10 @@ def pack_bundle(workspace: str | Path, output: str | Path | None = None) -> Path
     """Write a deterministic canonical ZIP archive from an editable workspace."""
     root = require_bundle_workspace_path(workspace)
     kind = probe_bundle_kind(root)
+    from .speech.profile_store import read_workspace_speech_profile
+
+    profile = read_workspace_speech_profile(root, missing="empty")
+    assert profile is not None
     destination = default_bundle_archive_path(root) if output is None else Path(output).expanduser()
     if not destination.name.endswith(".ssmd-bundle.zip"):
         raise BundleIdentityError("packed bundle output must end with '.ssmd-bundle.zip'")
@@ -176,9 +187,19 @@ def pack_bundle(workspace: str | Path, output: str | Path | None = None) -> Path
         raise BundleIdentityError(f"packed bundle output already exists: {destination}")
     if kind == "book":
         book_value = _book_bundle.load_book_bundle(root)
-        return _book_bundle.write_book_bundle(book_value, destination, format="zip")
+        return _book_bundle.write_book_bundle(
+            book_value,
+            destination,
+            format="zip",
+            speech_profile=profile,
+        )
     document_value = _document_bundle.load_document_bundle(root)
-    return _document_bundle.write_document_bundle(document_value, destination, format="zip")
+    return _document_bundle.write_document_bundle(
+        document_value,
+        destination,
+        format="zip",
+        speech_profile=profile,
+    )
 
 
 def write_bundle(
@@ -186,18 +207,33 @@ def write_bundle(
     output: str | Path,
     *,
     overwrite: bool = False,
+    speech_profile: SpeechReplacementProfile | None = None,
 ) -> Path:
     """Write a book or document bundle to a canonical directory workspace."""
     destination = Path(output).expanduser()
     if not destination.name.endswith(".ssmd-bundle"):
         raise BundleIdentityError("bundle output must end with '.ssmd-bundle'")
+    if speech_profile is None:
+        from .speech.profile import empty_speech_profile
+
+        selected_profile = empty_speech_profile()
+    else:
+        selected_profile = speech_profile
     if isinstance(value, Book):
         return _book_bundle.write_book_bundle(
-            value, destination, format="directory", overwrite=overwrite
+            value,
+            destination,
+            format="directory",
+            overwrite=overwrite,
+            speech_profile=selected_profile,
         )
     if isinstance(value, SsmdDocument):
         return _document_bundle.write_document_bundle(
-            value, destination, format="directory", overwrite=overwrite
+            value,
+            destination,
+            format="directory",
+            overwrite=overwrite,
+            speech_profile=selected_profile,
         )
     raise TypeError("bundle value must be a Book or SsmdDocument")
 

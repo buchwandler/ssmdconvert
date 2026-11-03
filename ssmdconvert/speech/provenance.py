@@ -6,6 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Literal
 
 from ..analysis.models import SsmdAnalysis
+from .profile import SpeechReplacementProfile, speech_profile_fingerprint
 
 SpeechProvenanceStatus = Literal["complete", "incomplete"]
 
@@ -15,6 +16,7 @@ def build_speech_provenance(
     *,
     status: SpeechProvenanceStatus = "complete",
     source_sha256: str | None = None,
+    replacement_profile: SpeechReplacementProfile | None = None,
 ) -> dict[str, Any]:
     """Capture the exact preparation/runtime evidence used for automatic SSMD aliases."""
     try:
@@ -24,7 +26,7 @@ def build_speech_provenance(
         raise ValueError(f"cannot record speech runtime version: {exc}") from exc
 
     preparation = analysis.preparation
-    return {
+    provenance: dict[str, Any] = {
         "status": status,
         "owner": "ssmdconvert",
         "engine": "ttsready",
@@ -36,6 +38,9 @@ def build_speech_provenance(
         "runtime_fingerprint": preparation.runtime_fingerprint,
         "prepared_fingerprint": preparation.prepared_fingerprint,
     }
+    if replacement_profile is not None:
+        provenance["speech_profile_fingerprint"] = speech_profile_fingerprint(replacement_profile)
+    return provenance
 
 
 def preserved_speech_provenance(source_sha256: str) -> dict[str, str]:

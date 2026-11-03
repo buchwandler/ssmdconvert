@@ -68,8 +68,19 @@ from .speech.inventory import SpeechInventoryOptions
 from .speech.profile import (
     SpeechReplacementProfile,
     effective_replacements,
-    load_speech_profile,
     speech_profile_fingerprint,
+    with_speech_replacement,
+    without_speech_replacement,
+    write_speech_profile,
+)
+from .speech.profile_store import (
+    BUNDLE_SPEECH_PROFILE_PATH,
+    ResolvedSpeechProfile,
+    read_bundle_speech_profile,
+    read_workspace_speech_profile,
+    resolve_conversion_speech_profile,
+    resolve_operation_speech_profile,
+    write_bundle_speech_profile,
 )
 from .speech.provenance import build_speech_provenance
 from .speech.workflows import summarize_changes
@@ -331,19 +342,27 @@ def _same_path(left: Path, right: Path) -> bool:
     return left.exists() and right.exists() and os.path.samefile(left, right)
 
 
-def _load_speech_replacements(speech_profile: Path | None) -> Mapping[str, str] | None:
-    if speech_profile is None:
+def _load_speech_replacements(
+    source: Path,
+    explicit: Path | None,
+) -> tuple[ResolvedSpeechProfile, Mapping[str, str]]:
+    resolved = resolve_operation_speech_profile(source, explicit)
+    return resolved, effective_replacements(resolved.profile)
+
+
+def _speech_profile_details(resolved: ResolvedSpeechProfile) -> dict[str, Any] | None:
+    if resolved.source == "default-empty":
         return None
+    source = "bundle speech.toml" if resolved.source == "bundle" else str(resolved.path)
+    return _speech_profile_summary(resolved.profile, source)
 
-    return effective_replacements(load_speech_profile(speech_profile))
 
-
-def _speech_profile_details(speech_profile: Path | None) -> dict[str, Any] | None:
-    if speech_profile is None:
-        return None
-    profile = load_speech_profile(speech_profile)
+def _speech_profile_summary(
+    profile: SpeechReplacementProfile,
+    source: str,
+) -> dict[str, Any]:
     return {
-        "source": speech_profile.name,
+        "source": source,
         "schema": profile.schema,
         "version": profile.version,
         "explicit_replacements": len(profile.replacements),
@@ -513,6 +532,7 @@ def _speech_materialize_to_destination(
     force: bool,
     spacy: SpacyPolicy,
     pronunciations: Mapping[str, str] | None,
+    speech_profile: SpeechReplacementProfile | None = None,
     on_progress: ProgressCallback,
     report_output: Path | None = None,
     json_output: bool = False,
@@ -606,9 +626,15 @@ def _speech_materialize_to_destination(
             speech_semantics=build_speech_provenance(
                 analysis,
                 source_sha256=document.source_sha256,
+                replacement_profile=speech_profile,
             ),
         )
-        write_bundle(updated_document, destination, overwrite=force)
+        write_bundle(
+            updated_document,
+            destination,
+            overwrite=force,
+            speech_profile=speech_profile,
+        )
     else:
         if source.is_dir():
             workspace = load_bundle_workspace(source)
@@ -639,9 +665,15 @@ def _speech_materialize_to_destination(
             speech_semantics=build_speech_provenance(
                 analysis,
                 source_sha256=book.source_sha256,
+                replacement_profile=speech_profile,
             ),
         )
-        write_bundle(updated_book, destination, overwrite=force)
+        write_bundle(
+            updated_book,
+            destination,
+            overwrite=force,
+            speech_profile=speech_profile,
+        )
 
     report = frozen.speech.to_dict()
     report["output"] = str(destination)
@@ -1006,8 +1038,8 @@ def report(
 ) -> None:
     """Report SSMD-aware preparation, source context, and TXT projection statistics."""
 
-    speech_replacements = _load_speech_replacements(speech_profile)
-    profile_details = _speech_profile_details(speech_profile)
+    resolved_profile, speech_replacements = _load_speech_replacements(source, speech_profile)
+    profile_details = _speech_profile_details(resolved_profile)
 
     def run(on_progress: ProgressCallback) -> None:
         cached = analyze_cached_api(
@@ -1113,7 +1145,7 @@ def txt(
     ] = None,
 ) -> None:
     """Project SSMD into generic prepared plain text for downstream TTS."""
-    speech_replacements = _load_speech_replacements(speech_profile)
+    _resolved_profile, speech_replacements = _load_speech_replacements(source, speech_profile)
 
     def run(on_progress: ProgressCallback) -> None:
         _analysis, projection = _analyze_projection(
@@ -1134,6 +1166,80 @@ def txt(
             typer.echo(f"Wrote prepared text: {_output_path(output)}", err=True)
 
     _run_with_cli_progress(progress, run, "prepared text complete")
+
+
+@speech_app.command("set")  # type: ignore[untyped-decorator]
+def speech_set(
+    bundle: Annotated[Path, typer.Argument()],
+    surface: Annotated[str, typer.Argument()],
+    spoken: Annotated[str, typer.Argument()],
+) -> None:
+    """Add or update one explicit replacement in a directory bundle profile."""
+
+    def run() -> None:
+        profile = read_workspace_speech_profile(bundle, missing="empty")
+        assert profile is not None
+        previous = profile.replacements.get(surface)
+        updated = with_speech_replacement(profile, surface, spoken)
+        if previous == spoken:
+            typer.echo(f"Speech profile unchanged: {surface} -> {spoken}")
+        else:
+            write_bundle_speech_profile(bundle, updated)
+            if previous is None:
+                typer.echo(f"Updated speech profile: {surface} -> {spoken}")
+            else:
+                typer.echo(f"Updated speech profile: {surface}: {previous} -> {spoken}")
+        typer.echo(f"Profile: {Path(bundle).expanduser() / BUNDLE_SPEECH_PROFILE_PATH}")
+        typer.echo("Re-run bundle conversion from the original source to rematerialize speech.")
+
+    _run_with_domain_errors(run)
+
+
+@speech_app.command("remove")  # type: ignore[untyped-decorator]
+def speech_remove(
+    bundle: Annotated[Path, typer.Argument()],
+    surface: Annotated[str, typer.Argument()],
+) -> None:
+    """Remove one explicit replacement from a directory bundle profile."""
+
+    def run() -> None:
+        profile = read_workspace_speech_profile(bundle, missing="empty")
+        assert profile is not None
+        updated = without_speech_replacement(profile, surface)
+        write_bundle_speech_profile(bundle, updated)
+        typer.echo(f"Removed speech replacement: {surface}")
+        typer.echo(f"Profile: {Path(bundle).expanduser() / BUNDLE_SPEECH_PROFILE_PATH}")
+
+    _run_with_domain_errors(run)
+
+
+@speech_app.command("export")  # type: ignore[untyped-decorator]
+def speech_export(
+    bundle: Annotated[Path, typer.Argument()],
+    output: Annotated[Path, typer.Option("--output", "-o")],
+    force: Annotated[bool, typer.Option("--force")] = False,
+) -> None:
+    """Export a bundle profile to a standalone canonical TOML file."""
+
+    def run() -> None:
+        profile = read_bundle_speech_profile(bundle, missing="empty")
+        assert profile is not None
+        source = Path(bundle).expanduser()
+        destination = _output_path(output)
+        if source.is_dir():
+            root = source.resolve(strict=True)
+            try:
+                destination.resolve(strict=False).relative_to(root)
+            except ValueError:
+                pass
+            else:
+                raise ValueError("speech export output must be outside the source bundle workspace")
+        elif _same_path(source, destination):
+            raise ValueError("speech export output must not replace the source archive")
+        written = write_speech_profile(output, profile, overwrite=force)
+        typer.echo(f"Exported speech profile: {_output_path(written)}")
+
+    _run_with_domain_errors(run)
 
 
 @speech_app.command("audit")  # type: ignore[untyped-decorator]
@@ -1163,7 +1269,7 @@ def speech_audit(
 ) -> None:
     """Audit SSMD speech changes, per-change dispositions, and mapping summary counts."""
 
-    speech_replacements = _load_speech_replacements(speech_profile)
+    _resolved_profile, speech_replacements = _load_speech_replacements(source, speech_profile)
 
     def run(on_progress: ProgressCallback) -> None:
         analysis = analyze_ssmd_api(
@@ -1212,8 +1318,8 @@ def speech_inventory(
 ) -> None:
     """Inventory likely speech-risk surfaces without changing the source."""
     try:
-        profile = load_speech_profile(speech_profile) if speech_profile is not None else None
-        replacements = None if profile is None else effective_replacements(profile)
+        resolved_profile, replacements = _load_speech_replacements(source, speech_profile)
+        profile = None if resolved_profile.source == "default-empty" else resolved_profile.profile
         inventory = inventory_speech_api(
             source,
             options=SpeechInventoryOptions(
@@ -1274,7 +1380,7 @@ def _run_speech_materialization_command(
     report_output: Path | None = None,
     json_output: bool = False,
 ) -> None:
-    speech_replacements = _load_speech_replacements(speech_profile)
+    resolved_profile, speech_replacements = _load_speech_replacements(source, speech_profile)
 
     def run(on_progress: ProgressCallback) -> None:
         destination, report = _speech_materialize_to_destination(
@@ -1286,6 +1392,7 @@ def _run_speech_materialization_command(
             force=force,
             spacy=spacy,
             pronunciations=speech_replacements,
+            speech_profile=resolved_profile.profile,
             on_progress=on_progress,
             report_output=report_output,
             json_output=json_output,
@@ -1580,11 +1687,21 @@ def bundle_convert(
     ] = None,
 ) -> None:
     """Convert an EPUB or supported document into one editable SSMD bundle."""
-    speech_replacements = _load_speech_replacements(speech_profile)
-    profile_details = _speech_profile_details(speech_profile)
 
     def run(on_progress: ProgressCallback) -> None:
         destination = output or default_bundle_workspace_path(source)
+        resolved_profile = resolve_conversion_speech_profile(destination, speech_profile)
+        profile = resolved_profile.profile
+        profile_source = (
+            "bundle speech.toml"
+            if resolved_profile.source == "destination"
+            else f"imported from {resolved_profile.path}"
+        )
+        profile_details = (
+            None
+            if resolved_profile.source == "default-empty"
+            else _speech_profile_summary(profile, profile_source)
+        )
         _reject_input_overwrite(source, _output_path(destination))
         report_destination = _preflight_report_output(
             report_output,
@@ -1607,7 +1724,7 @@ def bundle_convert(
                 ),
                 speech_semantics=speech_semantics,
                 spacy=spacy,
-                pronunciations=speech_replacements,
+                speech_profile=profile,
                 force=force,
                 on_progress=on_progress,
             )
@@ -1672,7 +1789,21 @@ def bundle_convert(
             )
         typer.echo(f"Created SSMD bundle: {result.output}")
         typer.echo(f"kind: {result.kind}")
-        if speech_profile is not None and speech_semantics == "preserve":
+        if resolved_profile.replaces_destination:
+            typer.echo(
+                f"Speech profile: replacing bundle-local profile with {resolved_profile.path}"
+            )
+        elif resolved_profile.source == "explicit":
+            typer.echo(
+                f"Speech profile: imported from {resolved_profile.path} "
+                f"({len(profile.replacements)} explicit replacements)"
+            )
+        elif resolved_profile.source == "destination" and profile.replacements:
+            typer.echo(
+                "Speech profile: bundle speech.toml "
+                f"({len(profile.replacements)} explicit replacements)"
+            )
+        if speech_semantics == "preserve" and resolved_profile.source != "default-empty":
             typer.echo(
                 "Speech profile: loaded, not materialized because speech semantics are preserved."
             )

@@ -8,9 +8,10 @@ from ssmd import parse_structure
 from typer.testing import CliRunner
 
 import ssmdconvert.cli as cli_module
-from ssmdconvert import Book, BookChapter, SourceInfo
+from ssmdconvert import Book, BookChapter, SourceInfo, SsmdDocument, pack_bundle, write_bundle
 from ssmdconvert._book_bundle import load_book_bundle, write_book_bundle
 from ssmdconvert.cli import app
+from ssmdconvert.speech.profile import parse_speech_profile, speech_profile_fingerprint
 
 runner = CliRunner()
 
@@ -42,6 +43,16 @@ def _book(path: Path) -> Path:
         source_chapter_count=2,
     )
     return write_book_bundle(book, path, format="directory")  # type: ignore[arg-type]
+
+
+def _speech_document_bundle(path: Path) -> Path:
+    document = SsmdDocument(
+        source=SourceInfo(format="ssmd", media_type="text/markdown", name="source.ssmd.md"),
+        metadata={"language": "en-US"},
+        ssmd=_document("ART met B-E."),
+        source_sha256="2" * 64,
+    )
+    return write_bundle(document, path)
 
 
 def test_speech_audit_json_is_read_only_and_uses_shared_change_ids(tmp_path: Path) -> None:
@@ -139,6 +150,125 @@ version = 1
     assert freeze.exit_code == 0, freeze.output
     assert freeze_output.read_text(encoding="utf-8") == frozen
     assert source.read_text(encoding="utf-8") == original
+
+
+def test_speech_profile_management_commands_are_safe_and_idempotent(tmp_path: Path) -> None:
+    bundle = _book(tmp_path / "legacy.ssmd-bundle")
+    profile_path = bundle / "speech.toml"
+    assert not profile_path.exists()
+
+    added = runner.invoke(app, ["speech", "set", str(bundle), "ART", "art"])
+    assert added.exit_code == 0, added.output
+    assert '"ART" = "art"' in profile_path.read_text(encoding="utf-8")
+    assert "Re-run bundle conversion" in added.output
+
+    unchanged = runner.invoke(app, ["speech", "set", str(bundle), "ART", "art"])
+    assert unchanged.exit_code == 0, unchanged.output
+    assert "profile unchanged" in unchanged.output
+
+    updated = runner.invoke(app, ["speech", "set", str(bundle), "ART", "A R T"])
+    assert updated.exit_code == 0, updated.output
+    assert "ART: art -> A R T" in updated.output
+
+    removed = runner.invoke(app, ["speech", "remove", str(bundle), "ART"])
+    assert removed.exit_code == 0, removed.output
+    assert "[replacements]" in profile_path.read_text(encoding="utf-8")
+    absent = runner.invoke(app, ["speech", "remove", str(bundle), "ART"])
+    assert absent.exit_code == 1
+    assert "no explicit replacement" in absent.output
+
+    runner.invoke(app, ["speech", "set", str(bundle), "ART", "art"])
+    archive = pack_bundle(bundle, tmp_path / "legacy.ssmd-bundle.zip")
+    exported = tmp_path / "portable.toml"
+    export_result = runner.invoke(app, ["speech", "export", str(archive), "-o", str(exported)])
+    assert export_result.exit_code == 0, export_result.output
+    assert parse_speech_profile(exported.read_text(encoding="utf-8")).replacements["ART"] == "art"
+
+    refused = runner.invoke(app, ["speech", "export", str(bundle), "-o", str(exported)])
+    assert refused.exit_code == 1
+    assert "already exists" in refused.output
+    overwrite = runner.invoke(
+        app, ["speech", "export", str(bundle), "-o", str(exported), "--force"]
+    )
+    assert overwrite.exit_code == 0, overwrite.output
+
+    inside = runner.invoke(
+        app,
+        ["speech", "export", str(bundle), "-o", str(bundle / "copy.toml")],
+    )
+    assert inside.exit_code == 1
+    assert "outside the source bundle workspace" in inside.output
+    mutation = runner.invoke(app, ["speech", "set", str(archive), "ART", "art"])
+    assert mutation.exit_code == 1
+
+
+def test_bundle_local_profile_is_discovered_by_speech_commands(tmp_path: Path) -> None:
+    bundle = _speech_document_bundle(tmp_path / "speech.ssmd-bundle")
+    set_art = runner.invoke(app, ["speech", "set", str(bundle), "ART", "art"])
+    assert set_art.exit_code == 0, set_art.output
+    set_be = runner.invoke(app, ["speech", "set", str(bundle), "B-E", "B E"])
+    assert set_be.exit_code == 0, set_be.output
+
+    report = runner.invoke(app, ["report", str(bundle), "--format", "md"])
+    assert report.exit_code == 0, report.output
+    assert "bundle speech.toml" in report.output
+
+    projected = runner.invoke(app, ["txt", str(bundle)])
+    assert projected.exit_code == 0, projected.output
+    assert "art met B E." in projected.output
+
+    audit = runner.invoke(app, ["speech", "audit", str(bundle), "--json"])
+    assert audit.exit_code == 0, audit.output
+    changes = {item["source"]: item["replacement"] for item in json.loads(audit.output)["changes"]}
+    assert changes["ART"] == "art"
+    assert changes["B-E"] == "B E"
+
+    inventory = runner.invoke(app, ["speech", "inventory", str(bundle), "--format", "json"])
+    assert inventory.exit_code == 0, inventory.output
+    assert json.loads(inventory.output)["speech_profile"]["explicit_replacements"] == 2
+
+    annotated = tmp_path / "annotated.ssmd-bundle"
+    annotation = runner.invoke(app, ["speech", "annotate", str(bundle), "-o", str(annotated)])
+    assert annotation.exit_code == 0, annotation.output
+    assert (annotated / "speech.toml").is_file()
+    assert '[ART]{sub="art"}' in (annotated / "document.ssmd.md").read_text(encoding="utf-8")
+
+    frozen = tmp_path / "frozen.ssmd-bundle"
+    freeze = runner.invoke(app, ["speech", "freeze", str(bundle), "-o", str(frozen)])
+    assert freeze.exit_code == 0, freeze.output
+    assert (frozen / "speech.toml").is_file()
+    assert '[B-E]{sub="B E"}' in (frozen / "document.ssmd.md").read_text(encoding="utf-8")
+    expected_profile_fingerprint = speech_profile_fingerprint(
+        parse_speech_profile((bundle / "speech.toml").read_text(encoding="utf-8"))
+    )
+    frozen_manifest = json.loads((frozen / "manifest.json").read_text(encoding="utf-8"))
+    assert (
+        frozen_manifest["speech_semantics"]["speech_profile_fingerprint"]
+        == expected_profile_fingerprint
+    )
+
+    packed = pack_bundle(bundle, tmp_path / "speech.ssmd-bundle.zip")
+    packed_audit = runner.invoke(app, ["speech", "audit", str(packed), "--json"])
+    assert packed_audit.exit_code == 0, packed_audit.output
+    packed_changes = {
+        item["source"]: item["replacement"] for item in json.loads(packed_audit.output)["changes"]
+    }
+    assert packed_changes["ART"] == "art"
+
+    external = tmp_path / "override.toml"
+    external.write_text(
+        'schema = "ssmdconvert-speech-profile"\nversion = 1\n[replacements]\n"ART" = "A R T"\n',
+        encoding="utf-8",
+    )
+    override = runner.invoke(
+        app,
+        ["speech", "audit", str(bundle), "--speech-profile", str(external), "--json"],
+    )
+    assert override.exit_code == 0, override.output
+    override_changes = {
+        item["source"]: item["replacement"] for item in json.loads(override.output)["changes"]
+    }
+    assert override_changes["ART"] == "A R T"
 
 
 def test_speech_freeze_reports_json_and_human_summaries(tmp_path: Path) -> None:

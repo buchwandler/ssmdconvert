@@ -71,18 +71,22 @@ publishes a new destination and never mutates a workspace in place. The
 [analysis workflow guide](docs/analysis-workflows.md) describes cache freshness,
 language handling, progress, and safe publication.
 
-## Speech profiles and inventory
+## Bundle-local speech profiles
 
-Create an editable vocabulary inventory before freezing a book, then reuse one explicit profile across conversion and speech workflows:
+Every newly created `.ssmd-bundle` includes an editable `speech.toml` recipe. Speech-aware commands automatically use the recipe from a bundle workspace or packed archive; an explicit `--speech-profile` still overrides it for one operation.
 
 ```bash
-ssmdconvert speech inventory novel.epub --format toml -o speech.toml
-# Review the template, then edit speech.toml.
-ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle --speech-profile speech.toml
-ssmdconvert speech audit novel.ssmd-bundle --speech-profile speech.toml
+ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle
+ssmdconvert speech set novel.ssmd-bundle ART art
+ssmdconvert speech set novel.ssmd-bundle B-E "B E"
+# Edit speech.toml directly if preferred; no bundle refresh is needed.
+ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle --force
+ssmdconvert speech export novel.ssmd-bundle -o speech.toml
 ```
 
-See [speech inventory](docs/speech-inventory.md) and [speech replacement profiles](docs/speech-profiles.md) for supported inputs, matching, precedence, and TOML details.
+Changing the recipe does not patch already materialized SSMD. Rebuild from the original source; `--force` intentionally replaces the destination bundle and any chapter edits in it. Existing SSMD `sub` annotations remain authoritative. Legacy bundles without `speech.toml` continue to work with an empty profile, and packing carries the profile for portable use.
+
+Use `speech inventory SOURCE --format toml -o speech.toml` to bootstrap an external recipe, then pass it once with `bundle convert --speech-profile speech.toml`; the bundle stores a canonical copy for later rebuilds. See [speech inventory](docs/speech-inventory.md) and [speech replacement profiles](docs/speech-profiles.md) for matching and precedence details.
 
 ## Python API
 

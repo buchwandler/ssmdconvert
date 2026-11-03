@@ -18,9 +18,14 @@ if TYPE_CHECKING:
     from .speech.profile import (
         SpeechReplacementProfile,
         effective_replacements,
+        empty_speech_profile,
         load_speech_profile,
         parse_speech_profile,
+        render_speech_profile,
         speech_profile_fingerprint,
+        with_speech_replacement,
+        without_speech_replacement,
+        write_speech_profile,
     )
 
 from .api import (
@@ -149,6 +154,11 @@ def __getattr__(name: str) -> Any:
         "effective_replacements",
         "load_speech_profile",
         "parse_speech_profile",
+        "empty_speech_profile",
+        "render_speech_profile",
+        "write_speech_profile",
+        "with_speech_replacement",
+        "without_speech_replacement",
         "speech_profile_fingerprint",
     }:
         from .speech import profile
@@ -228,6 +238,11 @@ __all__ = [
     "load_speech_profile",
     "parse_speech_profile",
     "speech_profile_fingerprint",
+    "empty_speech_profile",
+    "render_speech_profile",
+    "write_speech_profile",
+    "with_speech_replacement",
+    "without_speech_replacement",
     "BundleConversionResult",
     "BundleInspection",
     "BundleKind",

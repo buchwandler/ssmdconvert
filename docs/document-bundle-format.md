@@ -18,6 +18,9 @@ character count, and content digest. Manifest JSON is UTF-8 and strict JSON;
 metadata must be JSON-compatible. The source digest is captured during
 conversion, and publication does not reread the source.
 
+A root-level `speech.toml` may accompany the manifest as an editable recipe. It is validated separately and is not included in the document digest, so profile edits do not dirty the document workspace. Legacy bundles without it remain valid; new writes and packed legacy bundles include a canonical profile, empty when none was supplied.
+When complete speech provenance is present, optional `speech_profile_fingerprint` records the canonical SSMDConvert replacement-profile hash, separate from the existing TTSReady preparation `profile_fingerprint`. Older complete provenance without this field remains valid.
+
 ## Validation and workspace behavior
 
 Strict loading checks manifest fields and versions, canonical paths, source and

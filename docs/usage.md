@@ -79,21 +79,34 @@ Speech audit is read-only. Annotation and freeze publish a new destination and
 never modify a workspace in place. See [analysis and speech workflows](analysis-workflows.md)
 for cache freshness, language behavior, and output policy.
 
-## Speech profiles and inventory
+## Bundle-local speech profiles and inventory
 
-Use `ssmdconvert speech inventory SOURCE` to find likely speech-risk surfaces in an EPUB, supported document, standalone SSMD file, or canonical bundle. The default output is a table; `--format json` emits a versioned result and `--format toml` creates an editable profile template. A profile is selected explicitly with `--speech-profile PATH` and is never discovered from the current directory.
+New bundles contain an editable root-level `speech.toml`. Bundle inputs automatically use that profile for `report`, `txt`, `speech audit`, `speech inventory`, `speech annotate`, and `speech freeze`. An explicit `--speech-profile PATH` overrides the local recipe for that operation; SSMDConvert never searches ambient directories. Legacy bundles without the sidecar use an empty profile and remain readable.
 
 ```bash
+# Bootstrap from inventory and copy an external profile into a new bundle.
 ssmdconvert speech inventory novel.epub --format toml -o speech.toml
 ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle --speech-profile speech.toml
-ssmdconvert report novel.ssmd-bundle --speech-profile speech.toml
-ssmdconvert txt novel.ssmd-bundle --speech-profile speech.toml -o prepared.txt
-ssmdconvert speech audit novel.ssmd-bundle --speech-profile speech.toml --json
-ssmdconvert speech annotate novel.ssmd-bundle --speech-profile speech.toml -o annotated.ssmd-bundle
-ssmdconvert speech freeze novel.ssmd-bundle --speech-profile speech.toml -o frozen.ssmd-bundle
+
+# Or edit the bundle's recipe with the CLI or a text editor.
+ssmdconvert speech set novel.ssmd-bundle ART art
+ssmdconvert speech set novel.ssmd-bundle B-E "B E"
+ssmdconvert speech remove novel.ssmd-bundle B-E
+ssmdconvert report novel.ssmd-bundle
+ssmdconvert speech audit novel.ssmd-bundle --json
+
+# Rebuild from the original source; the destination profile is reused automatically.
+ssmdconvert bundle convert novel.epub -o novel.ssmd-bundle --force
+ssmdconvert speech export novel.ssmd-bundle -o portable-speech.toml
 ```
 
-Profiles preserve visible source text and materialize spoken forms through SSMD `sub` annotations. Existing authoritative `sub` values win; inventory/audit can show when a profile entry is shadowed. In preserve mode, conversion validates a selected profile but does not materialize it. See [speech replacement profiles](speech-profiles.md) and [speech-risk inventory](speech-inventory.md) for details and all options.
+Direct edits to `speech.toml` do not require `bundle refresh` and do not rewrite materialized chapters. Changing a recipe requires rebuilding from the original source; `--force` intentionally replaces the complete destination bundle and any chapter edits. Existing SSMD `sub` annotations remain authoritative. `speech set` and `speech remove` modify directory workspaces only; `speech export` accepts a workspace or packed archive and refuses an existing output unless `--force` is supplied.
+
+`--speech-profile PATH` remains available on `bundle convert`, `report`, `txt`, `speech audit`, `speech inventory`, `speech annotate`, and `speech freeze`. For conversion, an explicit profile wins over an existing destination recipe; without it, the destination's `speech.toml` is reused, or an empty profile is used for a new destination. Selection and validation occur before forced replacement. With `--speech-semantics preserve`, conversion stores the selected recipe but does not materialize its replacements.
+
+The inventory command identifies candidate surfaces in raw EPUB/document sources, standalone SSMD, and directory or ZIP bundles. Its default output is a table; `--format json` emits a versioned result and `--format toml` writes a portable profile template. Inventory output must be written outside a bundle workspace.
+
+See [speech replacement profiles](speech-profiles.md) for profile schema, matching policy, precedence, and the rebuild workflow, and [speech-risk inventory](speech-inventory.md) for candidate signals and output formats.
 
 ## Help
 

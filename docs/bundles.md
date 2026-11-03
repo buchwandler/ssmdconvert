@@ -55,6 +55,8 @@ workflows can read current valid content from a dirty directory workspace
 without silently refreshing it. Packing reads current valid workspace content
 and does not change the workspace manifest.
 
+New workspaces also contain an editable root-level `speech.toml`. The sidecar is portable configuration rather than chapter/document content: editing it does not change manifest digests or require `refresh`. Packing includes a validated canonical copy; old workspaces without the sidecar remain readable and pack with an empty profile.
+
 ```bash
 ssmdconvert bundle metadata notes.ssmd-bundle --json
 ssmdconvert bundle refresh notes.ssmd-bundle --check
@@ -76,7 +78,9 @@ ssmdconvert speech audit notes.ssmd-bundle --json
 ssmdconvert speech freeze novel.ssmd-bundle.zip -o frozen.ssmd-bundle.zip
 ```
 
-For consistent project vocabulary during fresh EPUB conversion, pass `--speech-profile PATH` to `bundle convert`. All selected chapters use the same mapping before automatic speech freeze; preserve-mode conversion validates the profile but does not materialize it. See [Speech replacement profiles](speech-profiles.md) and [Speech-risk inventory](speech-inventory.md).
+New bundles own a root-level `speech.toml` recipe. It is validated separately from manifest chapter/document hashes, so direct edits do not make a workspace dirty and require no `bundle refresh`. Bundle-aware speech commands use that profile automatically; an explicit `--speech-profile PATH` overrides it for the operation. `bundle pack` carries the canonical profile into the archive, and a legacy bundle without the sidecar behaves as if it had an empty profile.
+
+When rebuilding from the original EPUB or document into an existing destination, selection is `--speech-profile` first, then the recognized destination bundle's `speech.toml`, then an empty profile. The profile is read before `--force` replaces the destination. The selected recipe is written into the new bundle. A changed profile does not rewrite existing chapter SSMD: rebuild from the original source, and remember that `--force` replaces chapter edits in the destination. See [Speech replacement profiles](speech-profiles.md) for the edit/rebuild workflow.
 
 Speech writes publish to a new destination; they never mutate a workspace in
 place. Book conversion freezes eligible automatic speech decisions by default.

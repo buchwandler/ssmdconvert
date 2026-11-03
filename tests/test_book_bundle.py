@@ -6,6 +6,7 @@ import json
 import stat
 import warnings
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,13 @@ from ssmdconvert._book_bundle import (
     write_book_bundle,
 )
 from ssmdconvert.books import convert_book
+from ssmdconvert.bundle import pack_bundle, write_bundle
 from ssmdconvert.errors import BookBundleError, BookBundleValidationError
+from ssmdconvert.speech.profile import (
+    empty_speech_profile,
+    parse_speech_profile,
+    render_speech_profile,
+)
 
 
 def _book(tmp_path: Path):
@@ -121,6 +128,7 @@ def test_speech_semantics_provenance_roundtrips_in_both_bundle_formats(tmp_path:
 
     assert complete_book.speech_semantics is not None
     assert complete_book.speech_semantics["status"] == "complete"
+    assert "speech_profile_fingerprint" not in complete_book.speech_semantics
     assert preserved_book.speech_semantics == {
         "status": "preserved",
         "owner": "ssmdconvert",
@@ -137,6 +145,15 @@ def test_speech_semantics_provenance_roundtrips_in_both_bundle_formats(tmp_path:
             _assert_same_book(book, loaded)
             assert loaded.speech_semantics == book.speech_semantics
             assert loaded.speech_semantics["status"] == label
+
+    invalid_semantics = dict(complete_book.speech_semantics)
+    invalid_semantics["speech_profile_fingerprint"] = "not-a-sha256"
+    with pytest.raises(BookBundleValidationError, match="speech_profile_fingerprint"):
+        write_book_bundle(
+            replace(complete_book, speech_semantics=invalid_semantics),
+            tmp_path / "bad-speech-provenance.ssmd-bundle",
+            format="directory",
+        )
 
 
 def test_source_hash_is_captured_before_bundle_write(tmp_path: Path) -> None:
@@ -199,6 +216,39 @@ def test_manifest_order_is_authoritative_and_zip_is_deterministic(tmp_path: Path
     manifest["chapters"].reverse()
     _write_manifest(directory, manifest)
     assert [chapter.source_number for chapter in load_book_bundle(directory).chapters] == [2, 1]
+
+
+def test_public_bundle_writer_creates_profile_and_pack_preserves_it(tmp_path: Path) -> None:
+    _source, book = _book(tmp_path)
+    default_workspace = write_bundle(book, tmp_path / "default.ssmd-bundle")
+    profile_path = default_workspace / "speech.toml"
+    assert profile_path.read_text(encoding="utf-8") == render_speech_profile(empty_speech_profile())
+
+    legacy = write_book_bundle(book, tmp_path / "legacy.ssmd-bundle", format="directory")
+    legacy_archive = pack_bundle(legacy, tmp_path / "legacy.ssmd-bundle.zip")
+    with zipfile.ZipFile(legacy_archive) as archive:
+        assert archive.read("speech.toml").decode("utf-8") == render_speech_profile(
+            empty_speech_profile()
+        )
+
+    profile = parse_speech_profile(
+        'schema = "ssmdconvert-speech-profile"\nversion = 1\n[replacements]\n"ART" = "art"\n'
+    )
+    workspace = write_bundle(book, tmp_path / "profiled.ssmd-bundle", speech_profile=profile)
+    archive_path = pack_bundle(workspace, tmp_path / "profiled.ssmd-bundle.zip")
+    with zipfile.ZipFile(archive_path) as archive:
+        names = archive.namelist()
+        assert names == [
+            "manifest.json",
+            "speech.toml",
+            "chapters/chapter-0001.ssmd.md",
+            "chapters/chapter-0002.ssmd.md",
+        ]
+        assert archive.read("speech.toml").decode("utf-8") == render_speech_profile(profile)
+
+    (workspace / "speech.toml").write_text("invalid", encoding="utf-8")
+    with pytest.raises(BookBundleValidationError, match="speech.toml"):
+        validate_book_bundle(workspace)
 
 
 def test_bundle_output_refuses_overwrite_and_removes_stale_files(tmp_path: Path) -> None:
