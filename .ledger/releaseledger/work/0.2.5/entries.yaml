@@ -1,0 +1,26 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.2.5
+git_base_ref: ef9b68b9eb9cf582b4d259b2d474e12adbd01785
+git_base_sha: ef9b68b9eb9cf582b4d259b2d474e12adbd01785
+git_head_ref: 94fcbc6337447bb7b0d4950c4e1484be4358e4d1
+git_head_sha: 94fcbc6337447bb7b0d4950c4e1484be4358e4d1
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added source provenance inspection for bundles, including match or stale status and replacement-safety checks"
+    status: accepted
+    source_refs:
+      - git:94fcbc6337447bb7b0d4950c4e1484be4358e4d1
+    paths:
+      - ssmdconvert/__init__.py
+      - ssmdconvert/bundle.py
+      - tests/test_bundle_source_provenance.py
+    sources:
+      - git:94fcbc6337447bb7b0d4950c4e1484be4358e4d1
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

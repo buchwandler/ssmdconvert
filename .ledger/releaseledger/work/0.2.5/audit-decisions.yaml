@@ -1,0 +1,14 @@
+rows:
+  - sha: 94fcbc6337447bb7b0d4950c4e1484be4358e4d1
+    inspected: true
+    inspected_paths:
+      - ssmdconvert/__init__.py
+      - ssmdconvert/bundle.py
+      - tests/test_bundle_source_provenance.py
+    observed_behavior: "Exposed a read-only bundle source provenance inspection API that compares source kind, filename, SHA-256, and editable-bundle state, reports match or stale status, and indicates whether replacement is safe; added regression coverage for changed sources and edited bundles."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

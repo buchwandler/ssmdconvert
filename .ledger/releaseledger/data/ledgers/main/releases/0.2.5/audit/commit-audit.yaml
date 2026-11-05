@@ -1,0 +1,40 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.2.5
+git_base_ref: v0.2.4
+git_base_sha: ef9b68b9eb9cf582b4d259b2d474e12adbd01785
+git_head_ref: HEAD
+git_head_sha: 94fcbc6337447bb7b0d4950c4e1484be4358e4d1
+git_range: ef9b68b9eb9cf582b4d259b2d474e12adbd01785..94fcbc6337447bb7b0d4950c4e1484be4358e4d1
+commit_count: 1
+rows:
+  - sha: 94fcbc6337447bb7b0d4950c4e1484be4358e4d1
+    source_ref: git:94fcbc6337447bb7b0d4950c4e1484be4358e4d1
+    short_sha: 94fcbc6
+    changed_paths:
+      - ssmdconvert/__init__.py
+      - ssmdconvert/bundle.py
+      - tests/test_bundle_source_provenance.py
+    stats:
+      files_changed: 3
+      insertions: 145
+      deletions: 0
+    inspected: true
+    inspected_paths:
+      - ssmdconvert/__init__.py
+      - ssmdconvert/bundle.py
+      - tests/test_bundle_source_provenance.py
+    observed_behavior:
+      Exposed a read-only bundle source provenance inspection API that
+      compares source kind, filename, SHA-256, and editable-bundle state, reports match
+      or stale status, and indicates whether replacement is safe; added regression coverage
+      for changed sources and edited bundles.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: api for readio added"
+    target_entry_id: entry-0001
+    notes: ""

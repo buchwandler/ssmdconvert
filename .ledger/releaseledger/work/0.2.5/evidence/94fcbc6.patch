@@ -1,0 +1,222 @@
+ ssmdconvert/__init__.py                |  4 ++
+ ssmdconvert/bundle.py                  | 96 ++++++++++++++++++++++++++++++++++
+ tests/test_bundle_source_provenance.py | 45 ++++++++++++++++
+ 3 files changed, 145 insertions(+)
+
+diff --git a/ssmdconvert/__init__.py b/ssmdconvert/__init__.py
+index 6ddd03a..8a27c85 100644
+--- a/ssmdconvert/__init__.py
++++ b/ssmdconvert/__init__.py
+@@ -47,10 +47,12 @@ from .books import inspect_book
+ from .bundle import (
+     BundleConversionResult,
+     BundleInspection,
++    BundleSourceProvenanceInspection,
+     BundleWorkspace,
+     LoadedBundle,
+     convert_bundle,
+     inspect_bundle_source,
++    inspect_bundle_source_provenance,
+     load_bundle,
+     load_bundle_workspace,
+     pack_bundle,
+@@ -245,11 +247,13 @@ __all__ = [
+     "without_speech_replacement",
+     "BundleConversionResult",
+     "BundleInspection",
++    "BundleSourceProvenanceInspection",
+     "BundleKind",
+     "BundleStorage",
+     "BundleWorkspace",
+     "convert_bundle",
+     "inspect_bundle_source",
++    "inspect_bundle_source_provenance",
+     "LoadedBundle",
+     "default_bundle_archive_path",
+     "default_bundle_workspace_path",
+diff --git a/ssmdconvert/bundle.py b/ssmdconvert/bundle.py
+index 95708e0..64c72df 100644
+--- a/ssmdconvert/bundle.py
++++ b/ssmdconvert/bundle.py
+@@ -2,6 +2,7 @@
+
+ from __future__ import annotations
+
++import hashlib
+ from collections.abc import Mapping
+ from dataclasses import dataclass
+ from pathlib import Path
+@@ -47,6 +48,29 @@ class BundleInspection:
+     value: BundleInspectionValue
+
+
++@dataclass(frozen=True, slots=True)
++class BundleSourceProvenanceInspection:
++    """Read-only comparison of a source file with bundle provenance."""
++
++    source: Path
++    bundle: Path
++    source_kind: BundleKind
++    bundle_kind: BundleKind
++    source_name: str
++    bundle_source_name: str | None
++    source_sha256: str
++    bundle_source_sha256: str
++    source_name_matches: bool
++    source_sha256_matches: bool
++    state: Literal["match", "stale"]
++    replacement_safe: bool
++    reason: str | None = None
++
++    @property
++    def matches(self) -> bool:
++        return self.state == "match"
++
++
+ @dataclass(frozen=True, slots=True)
+ class BundleConversionResult:
+     kind: BundleKind
+@@ -97,6 +121,76 @@ def inspect_bundle_source(source: str | Path) -> BundleInspection:
+     return BundleInspection(kind=kind, value=value)
+
+
++def inspect_bundle_source_provenance(
++    source: str | Path, bundle: str | Path
++) -> BundleSourceProvenanceInspection:
++    """Compare a source file with the provenance recorded by an editable bundle.
++
++    The bundle's structure and current editable state are validated by SSMDConvert before
++    provenance is returned. ``replacement_safe`` is false when a source-kind change or
++    user-edited bundle content makes force-reconversion unsafe.
++    """
++    source_path = Path(source).expanduser().resolve(strict=True)
++    if not source_path.is_file() or source_path.name.casefold().endswith(
++        (".ssmd-bundle", ".ssmd-bundle.zip")
++    ):
++        raise BundleIdentityError("source provenance requires a supported source file")
++    bundle_path = require_bundle_workspace_path(bundle)
++    workspace = load_bundle_workspace(bundle_path)
++    source_kind = inspect_bundle_source(source_path).kind
++
++    digest = hashlib.sha256()
++    with source_path.open("rb") as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++            digest.update(chunk)
++    source_sha256 = digest.hexdigest()
++
++    if workspace.kind == "book":
++        value = workspace.value
++        assert isinstance(value, BookWorkspace)
++        bundle_source = value.book.source
++        bundle_source_sha256 = value.book.source_sha256
++        workspace_dirty = value.dirty
++    else:
++        value = workspace.value
++        assert isinstance(value, DocumentWorkspace)
++        bundle_source = value.document.source
++        bundle_source_sha256 = value.document.source_sha256
++        workspace_dirty = value.dirty
++
++    bundle_source_name = bundle_source.name
++    if bundle_source_name is None and bundle_source.path is not None:
++        bundle_source_name = bundle_source.path.name
++    name_matches = bundle_source_name == source_path.name
++    digest_matches = bundle_source_sha256 == source_sha256
++    kind_matches = source_kind == workspace.kind
++    matches = kind_matches and name_matches and digest_matches and not workspace_dirty
++    reasons: list[str] = []
++    if not kind_matches:
++        reasons.append("source kind differs from the bundle")
++    if not name_matches:
++        reasons.append("source filename differs from the bundle provenance")
++    if not digest_matches:
++        reasons.append("source content digest differs from the bundle provenance")
++    if workspace_dirty:
++        reasons.append("bundle contains user-edited content")
++    return BundleSourceProvenanceInspection(
++        source=source_path,
++        bundle=bundle_path,
++        source_kind=source_kind,
++        bundle_kind=workspace.kind,
++        source_name=source_path.name,
++        bundle_source_name=bundle_source_name,
++        source_sha256=source_sha256,
++        bundle_source_sha256=bundle_source_sha256,
++        source_name_matches=name_matches,
++        source_sha256_matches=digest_matches,
++        state="match" if matches else "stale",
++        replacement_safe=kind_matches and not workspace_dirty,
++        reason="; ".join(reasons) or None,
++    )
++
++
+ def convert_bundle(
+     source: str | Path,
+     *,
+@@ -278,6 +372,7 @@ __all__ = [
+     "BundleConversionResult",
+     "BundleInspection",
+     "BundleKind",
++    "BundleSourceProvenanceInspection",
+     "BundleStorage",
+     "BundleWorkspace",
+     "LoadedBundle",
+@@ -285,6 +380,7 @@ __all__ = [
+     "default_bundle_archive_path",
+     "default_bundle_workspace_path",
+     "inspect_bundle_source",
++    "inspect_bundle_source_provenance",
+     "load_bundle",
+     "load_bundle_workspace",
+     "pack_bundle",
+diff --git a/tests/test_bundle_source_provenance.py b/tests/test_bundle_source_provenance.py
+new file mode 100644
+index 0000000..3a50ed4
+--- /dev/null
++++ b/tests/test_bundle_source_provenance.py
+@@ -0,0 +1,45 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++import ssmdconvert
++
++
++def test_inspect_bundle_source_provenance_matches_and_detects_changed_source(
++    tmp_path: Path,
++) -> None:
++    source = tmp_path / "story.md"
++    source.write_text("# Story\n\nOriginal text.\n", encoding="utf-8")
++    bundle = tmp_path / "story.ssmd-bundle"
++    ssmdconvert.convert_bundle(source, output=bundle)
++
++    matching = ssmdconvert.inspect_bundle_source_provenance(source, bundle)
++    assert matching.state == "match"
++    assert matching.matches is True
++    assert matching.source_sha256_matches is True
++    assert matching.replacement_safe is True
++
++    source.write_text("# Story\n\nChanged text.\n", encoding="utf-8")
++    stale = ssmdconvert.inspect_bundle_source_provenance(source, bundle)
++    assert stale.state == "stale"
++    assert stale.matches is False
++    assert stale.source_sha256_matches is False
++    assert stale.replacement_safe is True
++
++
++def test_source_provenance_does_not_certify_replacement_of_edited_bundle(
++    tmp_path: Path,
++) -> None:
++    source = tmp_path / "story.md"
++    source.write_text("# Story\n\nOriginal text.\n", encoding="utf-8")
++    bundle = tmp_path / "story.ssmd-bundle"
++    ssmdconvert.convert_bundle(source, output=bundle)
++
++    workspace = ssmdconvert.load_bundle_workspace(bundle)
++    document_path = bundle / workspace.value.status.path
++    document_path.write_text('---\nssmd_version: "0.9"\n---\n\nEdited.\n', encoding="utf-8")
++
++    inspection = ssmdconvert.inspect_bundle_source_provenance(source, bundle)
++    assert inspection.state == "stale"
++    assert inspection.replacement_safe is False
++    assert "user-edited" in (inspection.reason or "")
