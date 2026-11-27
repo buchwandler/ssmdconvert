@@ -167,8 +167,8 @@ def _toml_string(value: str) -> str:
     return "".join(escaped)
 
 
-def render_speech_profile(profile: SpeechReplacementProfile) -> str:
-    """Render semantic profile data as deterministic UTF-8-compatible TOML."""
+def dump_speech_profile(profile: SpeechReplacementProfile) -> str:
+    """Serialize a validated speech profile as deterministic version-1 TOML."""
     if not isinstance(profile, SpeechReplacementProfile):
         raise TypeError("profile must be a SpeechReplacementProfile")
     lines = [
@@ -185,6 +185,11 @@ def render_speech_profile(profile: SpeechReplacementProfile) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_speech_profile(profile: SpeechReplacementProfile) -> str:
+    """Compatibility alias for :func:`dump_speech_profile`."""
+    return dump_speech_profile(profile)
+
+
 def write_speech_profile(
     path: str | Path,
     profile: SpeechReplacementProfile,
@@ -193,7 +198,7 @@ def write_speech_profile(
 ) -> Path:
     """Write a canonical profile, atomically replacing only when overwrite is enabled."""
     target = Path(path).expanduser()
-    rendered = render_speech_profile(profile).encode("utf-8", errors="strict")
+    rendered = dump_speech_profile(profile).encode("utf-8", errors="strict")
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.tmp-", dir=target.parent)
     temporary = Path(temporary_name)
@@ -235,6 +240,32 @@ def write_speech_profile(
     finally:
         temporary.unlink(missing_ok=True)
     return target
+
+
+def save_speech_profile(
+    profile: SpeechReplacementProfile,
+    path: str | Path,
+    *,
+    force: bool = False,
+) -> Path:
+    """Save a profile atomically, refusing existing destinations unless forced.
+
+    When forced, a destination symlink to a file is replaced rather than followed.
+    """
+    if not isinstance(profile, SpeechReplacementProfile):
+        raise TypeError("profile must be a SpeechReplacementProfile")
+    target = Path(path).expanduser()
+    if target.is_dir() and not target.is_symlink():
+        raise IsADirectoryError(f"speech profile output is a directory: {target}")
+    if not force and (target.exists() or target.is_symlink()):
+        raise FileExistsError(f"speech profile output already exists: {target}")
+    try:
+        return write_speech_profile(target, profile, overwrite=force)
+    except (FileExistsError, IsADirectoryError):
+        raise
+    except OSError as exc:
+        detail = exc.strerror or "an I/O error occurred"
+        raise OSError(f"cannot write speech profile: {target}: {detail}") from exc
 
 
 def with_speech_replacement(

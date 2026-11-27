@@ -307,12 +307,19 @@ def test_inventory_and_profile_models_are_exported_from_public_facades() -> None
         SpeechInventory,
         SpeechInventoryOptions,
         SpeechReplacementProfile,
+        dump_speech_profile,
+        save_speech_profile,
     )
     from ssmdconvert import inventory_speech as package_inventory_speech
     from ssmdconvert.speech import SpeechInventory as SpeechPackageInventory
     from ssmdconvert.speech import SpeechReplacementProfile as SpeechPackageProfile
+    from ssmdconvert.speech import dump_speech_profile as SpeechPackageDumpProfile
+    from ssmdconvert.speech import save_speech_profile as SpeechPackageSaveProfile
 
     assert SpeechInventory is SpeechPackageInventory
     assert SpeechReplacementProfile is SpeechPackageProfile
+
+    assert dump_speech_profile is SpeechPackageDumpProfile
+    assert save_speech_profile is SpeechPackageSaveProfile
     assert SpeechInventoryOptions().max_contexts == 2
     assert package_inventory_speech is inventory_speech

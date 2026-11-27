@@ -17,11 +17,13 @@ if TYPE_CHECKING:
     )
     from .speech.profile import (
         SpeechReplacementProfile,
+        dump_speech_profile,
         effective_replacements,
         empty_speech_profile,
         load_speech_profile,
         parse_speech_profile,
         render_speech_profile,
+        save_speech_profile,
         speech_profile_fingerprint,
         with_speech_replacement,
         without_speech_replacement,
@@ -153,6 +155,8 @@ def __getattr__(name: str) -> Any:
         return getattr(inventory, name)
     if name in {
         "SpeechReplacementProfile",
+        "dump_speech_profile",
+        "save_speech_profile",
         "effective_replacements",
         "load_speech_profile",
         "parse_speech_profile",
@@ -237,6 +241,8 @@ __all__ = [
     "project_text",
     "inventory_speech",
     "effective_replacements",
+    "dump_speech_profile",
+    "save_speech_profile",
     "load_speech_profile",
     "parse_speech_profile",
     "speech_profile_fingerprint",

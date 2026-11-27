@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import ttsready
 
@@ -395,8 +395,8 @@ def analyze_ssmd_source(
             SsmdAnalysisIssue(
                 code=issue.code,
                 severity=issue.severity,
-                section_id=metadata.get("section_id"),
-                paragraph_index=metadata.get("paragraph_index"),
+                section_id=cast(str | None, metadata.get("section_id")),
+                paragraph_index=cast(int | None, metadata.get("paragraph_index")),
                 clean_start=(
                     clean_base + start
                     if isinstance(clean_base, int) and start is not None

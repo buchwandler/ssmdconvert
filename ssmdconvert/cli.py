@@ -67,7 +67,10 @@ from .speech.failures import SpeechFreezeFailure
 from .speech.inventory import SpeechInventoryOptions
 from .speech.profile import (
     SpeechReplacementProfile,
+    _toml_string,
+    dump_speech_profile,
     effective_replacements,
+    empty_speech_profile,
     speech_profile_fingerprint,
     with_speech_replacement,
     without_speech_replacement,
@@ -836,32 +839,23 @@ def _render_speech_inventory_table(
 
 
 def _render_speech_inventory_toml(inventory: Any, profile: SpeechReplacementProfile | None) -> str:
-    explicit = {} if profile is None else dict(profile.replacements)
-    derive_possessives = True if profile is None else profile.derive_possessives
-    lines = [
-        'schema = "ssmdconvert-speech-profile"',
-        "version = 1",
-        f"derive_possessives = {'true' if derive_possessives else 'false'}",
-        "",
-        "[replacements]",
-        "",
-    ]
+    canonical_profile = profile if profile is not None else empty_speech_profile()
+    explicit = dict(canonical_profile.replacements)
+    canonical_lines = dump_speech_profile(canonical_profile).splitlines()
+    lines = canonical_lines[:3]
     if profile is not None:
-        lines.insert(
-            3,
-            f"# Profile fingerprint: {speech_profile_fingerprint(profile)}",
-        )
+        lines.append(f"# Profile fingerprint: {speech_profile_fingerprint(profile)}")
+    lines.extend(["", "[replacements]", ""])
+    serialized_entries = iter(canonical_lines[5:])
     candidates = {candidate.surface: candidate for candidate in inventory.candidates}
-    for surface, spoken in sorted(explicit.items()):
+    for surface in sorted(explicit):
         candidate = candidates.get(surface)
         if candidate is not None:
             lines.append(
                 f"# Existing entry; {candidate.count} occurrence(s), "
                 f"signals: {', '.join(candidate.reasons) or 'none'}."
             )
-        lines.append(
-            f"{json.dumps(surface, ensure_ascii=False)} = {json.dumps(spoken, ensure_ascii=False)}"
-        )
+        lines.append(next(serialized_entries))
     for candidate in inventory.candidates:
         if candidate.surface in explicit or candidate.profile_replacement is not None:
             continue
@@ -871,7 +865,7 @@ def _render_speech_inventory_toml(inventory: Any, profile: SpeechReplacementProf
         if candidate.existing_spoken_forms:
             spoken = "; ".join(" ".join(form.split()) for form in candidate.existing_spoken_forms)
             lines.append(f"# Existing SSMD sub value(s): {spoken}")
-        lines.append(f'# {json.dumps(candidate.surface, ensure_ascii=False)} = ""')
+        lines.append(f'# {_toml_string(candidate.surface)} = ""')
     return "\n".join(lines) + "\n"
 
 

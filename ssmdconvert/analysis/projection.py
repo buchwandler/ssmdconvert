@@ -101,7 +101,7 @@ def _prepare_context(
         prepared_text = "".join(fragments)
         split_language = prepared_languages[0] if prepared_languages else None
 
-    parts = (prepared_text,)
+    parts: tuple[str, ...] = (prepared_text,)
     if (
         max_paragraph_chars is not None
         and len(prepared_text) > max_paragraph_chars

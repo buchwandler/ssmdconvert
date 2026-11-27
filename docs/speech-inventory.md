@@ -39,6 +39,8 @@ The first command prints a review table. `-o, --output PATH` writes the selected
 
 A selected profile, whether explicit or discovered from a bundle, marks inventory candidates as covered and shows the effective replacement. It never changes the input. An explicit `--speech-profile` overrides the local recipe for this operation only. `--include-existing` controls discovery from SSMD substitutions; parser-clean visible text is still scanned either way. `--max-contexts` bounds example contexts per candidate, not occurrence counts.
 
+Applications can use inventory candidates and occurrence evidence to populate a replacement editor, then save a reviewed profile separately with `save_speech_profile()`. Inventory itself never applies profile replacements, saves a profile, or mutates the source. An authoritative SSMD `sub` remains in effect when a profile rule targets the same surface; the inventory reports that rule as shadowed.
+
 ## Signals
 
 Version 1 scans deterministically for:

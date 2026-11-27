@@ -169,6 +169,29 @@ for candidate in inventory.candidates:
 
 `SpeechInventory`, `SpeechInventoryCandidate`, `SpeechInventoryOccurrence`, and `SpeechInventoryOptions` are exported from the package facade. See [Speech-risk inventory](speech-inventory.md) for output semantics and [Speech replacement profiles](speech-profiles.md) for strict TOML validation, possessive derivation, and precedence.
 
+### Writable profile lifecycle
+
+`SpeechReplacementProfile` is the validated model for explicit replacements. Use the package APIs to serialize and save it rather than implementing the TOML format in an application:
+
+```python
+from ssmdconvert import (
+    SpeechReplacementProfile,
+    dump_speech_profile,
+    save_speech_profile,
+)
+
+profile = SpeechReplacementProfile(
+    schema="ssmdconvert-speech-profile",
+    version=1,
+    derive_possessives=True,
+    replacements={"ART": "art", "B-E": "B E"},
+)
+text = dump_speech_profile(profile)
+path = save_speech_profile(profile, "speech-replacements.toml")
+```
+
+Serialization is deterministic and stores explicit entries only. `effective_replacements()` adds derived possessives, while `speech_profile_fingerprint()` reflects canonical profile semantics independent of path or TOML key order. Saving refuses existing files and symlinks unless `force=True`; forcing replaces a destination symlink itself rather than following it. Existing SSMD `sub` values take precedence over profile rules. Inventory can feed a profile editor, but remains read-only and never changes the source.
+
 ```{autofunction} ssmdconvert.inventory_speech
 
 ```

@@ -17,6 +17,8 @@ __all__ = [
     "SpeechInventoryOccurrence",
     "SpeechInventoryOptions",
     "SpeechReplacementProfile",
+    "dump_speech_profile",
+    "save_speech_profile",
     "effective_replacements",
     "inventory_loaded_source",
     "load_speech_profile",
@@ -69,6 +71,8 @@ def __getattr__(name: str) -> Any:
         return getattr(inventory, name)
     if name in {
         "SpeechReplacementProfile",
+        "dump_speech_profile",
+        "save_speech_profile",
         "effective_replacements",
         "load_speech_profile",
         "parse_speech_profile",

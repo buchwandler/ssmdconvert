@@ -7,11 +7,13 @@ import ttsready
 
 from ssmdconvert.speech.profile import (
     SpeechReplacementProfile,
+    dump_speech_profile,
     effective_replacements,
     empty_speech_profile,
     load_speech_profile,
     parse_speech_profile,
     render_speech_profile,
+    save_speech_profile,
     speech_profile_fingerprint,
     with_speech_replacement,
     without_speech_replacement,
@@ -174,6 +176,109 @@ def test_profile_rendering_is_deterministic_sorted_and_toml_quoted() -> None:
     assert speech_profile_fingerprint(parse_speech_profile(rendered)) == speech_profile_fingerprint(
         profile
     )
+
+
+def test_dump_speech_profile_is_deterministic_and_round_trips_unicode_and_escapes() -> None:
+    replacements = {"β": "café", 'a"key': "quote \" slash \\ line\n tab\t apostrophe's ’"}
+    profile = SpeechReplacementProfile(
+        schema="ssmdconvert-speech-profile",
+        version=1,
+        replacements=replacements,
+    )
+    reordered = SpeechReplacementProfile(
+        schema="ssmdconvert-speech-profile",
+        version=1,
+        replacements=dict(reversed(tuple(replacements.items()))),
+    )
+
+    dumped = dump_speech_profile(profile)
+
+    assert dumped == dump_speech_profile(reordered)
+    assert dumped == render_speech_profile(profile)
+    assert dumped.endswith("\n") and not dumped.endswith("\n\n")
+    assert '"a\\"key"' in dumped
+    assert "\\\\" in dumped
+    assert "\\n" in dumped
+    assert "\\t" in dumped
+    assert "café" in dumped and "β" in dumped
+    assert "fingerprint" not in dumped
+    assert parse_speech_profile(dumped) == profile
+
+
+def test_dump_speech_profile_rejects_non_profiles() -> None:
+    with pytest.raises(TypeError, match="SpeechReplacementProfile"):
+        dump_speech_profile(object())  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="SpeechReplacementProfile"):
+        save_speech_profile(object(), Path("ignored.toml"))  # type: ignore[arg-type]
+
+
+def test_save_speech_profile_round_trips_and_refuses_overwrite(tmp_path: Path) -> None:
+    profile = parse_speech_profile(_VALID)
+    target = tmp_path / "speech.toml"
+
+    written = save_speech_profile(profile, target)
+
+    assert written == target
+    assert load_speech_profile(target) == profile
+    previous = target.read_bytes()
+    with pytest.raises(FileExistsError, match="speech profile output already exists"):
+        save_speech_profile(empty_speech_profile(), target)
+    assert target.read_bytes() == previous
+
+    replacement = empty_speech_profile()
+    assert save_speech_profile(replacement, target, force=True) == target
+    assert load_speech_profile(target) == replacement
+
+
+def test_save_speech_profile_expands_user_path_and_rejects_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    profile = empty_speech_profile()
+
+    assert save_speech_profile(profile, "~/speech.toml") == tmp_path / "speech.toml"
+    with pytest.raises(IsADirectoryError, match="speech profile output is a directory"):
+        save_speech_profile(profile, tmp_path, force=True)
+
+
+def test_save_speech_profile_replaces_symlink_itself_when_forced(tmp_path: Path) -> None:
+    profile = empty_speech_profile()
+    original = tmp_path / "original.toml"
+    original.write_text(_VALID, encoding="utf-8")
+    link = tmp_path / "linked.toml"
+    try:
+        link.symlink_to(original)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+
+    with pytest.raises(FileExistsError, match="speech profile output already exists"):
+        save_speech_profile(profile, link)
+    assert link.is_symlink()
+    assert original.read_text(encoding="utf-8") == _VALID
+
+    save_speech_profile(profile, link, force=True)
+
+    assert not link.is_symlink()
+    assert load_speech_profile(link) == profile
+    assert original.read_text(encoding="utf-8") == _VALID
+
+
+def test_save_speech_profile_preserves_existing_file_when_atomic_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "speech.toml"
+    target.write_text("original destination", encoding="utf-8")
+
+    def fail_fsync(_file_descriptor: int) -> None:
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr("ssmdconvert.speech.profile.os.fsync", fail_fsync)
+    with pytest.raises(OSError, match="cannot write speech profile"):
+        save_speech_profile(empty_speech_profile(), target, force=True)
+
+    assert target.read_text(encoding="utf-8") == "original destination"
+    assert not list(tmp_path.glob(".speech.toml.tmp-*"))
 
 
 def test_profile_mutators_return_independent_profiles() -> None:

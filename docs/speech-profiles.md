@@ -80,24 +80,26 @@ With `--speech-semantics preserve`, `bundle convert` still validates and stores 
 
 ```python
 from ssmdconvert import (
-    empty_speech_profile,
+    SpeechReplacementProfile,
+    dump_speech_profile,
     effective_replacements,
     load_speech_profile,
-    parse_speech_profile,
-    render_speech_profile,
+    save_speech_profile,
     speech_profile_fingerprint,
-    with_speech_replacement,
-    without_speech_replacement,
-    write_speech_profile,
 )
 
-profile = load_speech_profile("speech.toml")
-profile = with_speech_replacement(profile, "ART", "art")
-profile = without_speech_replacement(profile, "B-E")
-replacements = effective_replacements(profile)
-fingerprint = speech_profile_fingerprint(profile)
-canonical_toml = render_speech_profile(profile)
-write_speech_profile("portable.toml", profile)
+profile = SpeechReplacementProfile(
+    schema="ssmdconvert-speech-profile",
+    version=1,
+    derive_possessives=True,
+    replacements={"ART": "art", "B-E": "B E"},
+)
+canonical_toml = dump_speech_profile(profile)
+path = save_speech_profile(profile, "speech-replacements.toml")
+loaded = load_speech_profile(path)
+explicit = dict(loaded.replacements)
+effective = dict(effective_replacements(loaded))
+fingerprint = speech_profile_fingerprint(loaded)
 ```
 
-The stable `SpeechReplacementProfile` model and parsing helpers are exported from `ssmdconvert`. Analysis APIs continue to accept the existing `AnalysisOptions.pronunciations` mapping, so callers without profiles retain their current behavior.
+`SpeechReplacementProfile` is immutable and validates the version-1 schema and explicit replacement mapping. `dump_speech_profile()` returns deterministic UTF-8 TOML containing only explicit entries; possessive forms are derived at runtime by `effective_replacements()`. `save_speech_profile(profile, path)` expands `~`, writes atomically, and refuses existing files or symlinks by default. Pass `force=True` to replace an existing file; when the destination is a symlink, forced saving replaces the link itself and does not write through to its target. Profile fingerprints cover canonical semantics, not paths, comments, or TOML key order. Existing SSMD `sub` annotations remain authoritative over external profile rules. Inventory is a read-only discovery API and does not apply replacements or mutate source documents. The legacy `render_speech_profile()` and `write_speech_profile()` helpers remain available.
