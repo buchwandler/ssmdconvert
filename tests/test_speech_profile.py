@@ -235,6 +235,7 @@ def test_save_speech_profile_expands_user_path_and_rejects_directories(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     profile = empty_speech_profile()
 
     assert save_speech_profile(profile, "~/speech.toml") == tmp_path / "speech.toml"
